@@ -6,12 +6,15 @@ import (
 	"log/slog"
 	"os"
 
+	"asr_server/config"
+
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var Logger *slog.Logger
 
-// InitLogger 初始化日志系统，支持轮转和多输出
+// InitLogger initializes the logging system with rotation and multiple outputs.
+// This is the low-level initialization function with individual parameters.
 func InitLogger(level slog.Level, format, output, filePath string, maxSize, maxBackups, maxAge int, compress bool) {
 	var writers []io.Writer
 	if output == "console" || output == "both" {
@@ -35,6 +38,38 @@ func InitLogger(level slog.Level, format, output, filePath string, maxSize, maxB
 	}
 	Logger = slog.New(handler)
 }
+
+// InitFromConfig initializes the logger directly from config.LoggingConfig.
+// This is the recommended way to initialize the logger.
+func InitFromConfig(cfg config.LoggingConfig) {
+	InitLogger(
+		parseSlogLevel(cfg.Level),
+		cfg.Format,
+		cfg.Output,
+		cfg.FilePath,
+		cfg.MaxSize,
+		cfg.MaxBackups,
+		cfg.MaxAge,
+		cfg.Compress,
+	)
+}
+
+func parseSlogLevel(level string) slog.Level {
+	switch level {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// Convenience functions that use the global Logger
 
 func Info(msg string, args ...any) {
 	Logger.Info(msg, args...)
@@ -66,44 +101,4 @@ func Debug(msg string, args ...any) {
 
 func Debugf(format string, args ...any) {
 	Logger.Debug(fmt.Sprintf(format, args...))
-}
-
-type LoggingConfig struct {
-	Level      string `json:"level"`
-	Format     string `json:"format"`
-	Output     string `json:"output"`
-	FilePath   string `json:"file_path"`
-	MaxSize    int    `json:"max_size"`
-	MaxBackups int    `json:"max_backups"`
-	MaxAge     int    `json:"max_age"`
-	Compress   bool   `json:"compress"`
-}
-
-func parseSlogLevel(level string) slog.Level {
-	switch level {
-	case "debug":
-		return slog.LevelDebug
-	case "info":
-		return slog.LevelInfo
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
-}
-
-// InitLoggerFromConfig 直接用LoggingConfig结构体初始化logger
-func InitLoggerFromConfig(cfg LoggingConfig) {
-	InitLogger(
-		parseSlogLevel(cfg.Level),
-		cfg.Format,
-		cfg.Output,
-		cfg.FilePath,
-		cfg.MaxSize,
-		cfg.MaxBackups,
-		cfg.MaxAge,
-		cfg.Compress,
-	)
 }

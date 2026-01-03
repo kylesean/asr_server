@@ -25,16 +25,7 @@ func main() {
 	}
 
 	// Initialize logger with config
-	logger.InitLoggerFromConfig(logger.LoggingConfig{
-		Level:      cfg.Logging.Level,
-		Format:     cfg.Logging.Format,
-		Output:     cfg.Logging.Output,
-		FilePath:   cfg.Logging.FilePath,
-		MaxSize:    cfg.Logging.MaxSize,
-		MaxBackups: cfg.Logging.MaxBackups,
-		MaxAge:     cfg.Logging.MaxAge,
-		Compress:   cfg.Logging.Compress,
-	})
+	logger.InitFromConfig(cfg.Logging)
 	logger.Infof("✅ Configuration loaded")
 	cfg.Print()
 
