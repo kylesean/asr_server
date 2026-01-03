@@ -15,7 +15,10 @@ import (
 	sherpa "github.com/k2-fsa/sherpa-onnx-go/sherpa_onnx"
 )
 
+// AppDependencies holds all application dependencies.
+// This is the root dependency container for the application.
 type AppDependencies struct {
+	Config           *config.Config
 	SessionManager   *session.Manager
 	VADPool          pool.VADPoolInterface
 	RateLimiter      *middleware.RateLimiter
@@ -25,7 +28,7 @@ type AppDependencies struct {
 	HotReloadMgr     *hotreload.HotReloadManager
 }
 
-// createRecognizer 用于初始化 sherpa 识别器
+// createRecognizer initializes the sherpa offline recognizer
 func createRecognizer(cfg *config.Config) (*sherpa.OfflineRecognizer, error) {
 	c := sherpa.OfflineRecognizerConfig{}
 	c.FeatConfig.SampleRate = cfg.Audio.SampleRate
@@ -48,14 +51,14 @@ func createRecognizer(cfg *config.Config) (*sherpa.OfflineRecognizer, error) {
 	return recognizer, nil
 }
 
-// registerHotReloadCallbacks 注册配置热加载回调
-func registerHotReloadCallbacks(hotReloadMgr *hotreload.HotReloadManager) {
+// registerHotReloadCallbacks registers configuration hot reload callbacks
+func registerHotReloadCallbacks(hotReloadMgr *hotreload.HotReloadManager, cfg *config.Config) {
 	if hotReloadMgr == nil {
 		return
 	}
 
 	hotReloadMgr.RegisterCallback("logging.level", func() {
-		logger.Infof("🔄 Log level changed to: %s", config.GlobalConfig.Logging.Level)
+		logger.Infof("🔄 Log level change detected")
 	})
 	hotReloadMgr.RegisterCallback("vad", func() {
 		logger.Infof("🔄 VAD configuration changed")
@@ -72,11 +75,12 @@ func registerHotReloadCallbacks(hotReloadMgr *hotreload.HotReloadManager) {
 	logger.Infof("✅ Hot reload callbacks registered")
 }
 
-// InitApp 初始化所有核心组件，返回依赖注入结构体
+// InitApp initializes all core components and returns the dependency container.
+// All dependencies are explicitly created with the provided configuration.
 func InitApp(cfg *config.Config) (*AppDependencies, error) {
 	logger.Infof("🔧 Initializing components...")
 
-	// 初始化配置热加载管理器
+	// Initialize hot reload manager
 	logger.Infof("🔧 Initializing hot reload manager...")
 	hotReloadMgr, err := hotreload.NewHotReloadManager()
 	if err != nil {
@@ -87,7 +91,7 @@ func InitApp(cfg *config.Config) (*AppDependencies, error) {
 		logger.Warnf("Failed to start config file watching, continuing without hot reload: %v", err)
 	}
 
-	// 初始化全局识别器
+	// Initialize global recognizer
 	logger.Infof("🔧 Initializing global recognizer...")
 	globalRecognizer, err := createRecognizer(cfg)
 	if err != nil {
@@ -95,41 +99,42 @@ func InitApp(cfg *config.Config) (*AppDependencies, error) {
 		return nil, fmt.Errorf("failed to initialize global recognizer: %v", err)
 	}
 
-	// 根据VAD类型初始化VAD池
+	// Create VAD pool using factory with explicit config
 	var vadPool pool.VADPoolInterface
-	vadFactory := pool.NewVADFactory()
+	vadFactory := pool.NewVADFactory(cfg)
 
-	if config.GlobalConfig.VAD.Provider == pool.SILERO_TYPE {
-		// 检查VAD模型文件是否存在（仅对silero需要）
+	if cfg.VAD.Provider == pool.SILERO_TYPE {
+		// Check VAD model file existence (only for silero)
 		if _, err := os.Stat(cfg.VAD.SileroVAD.ModelPath); os.IsNotExist(err) {
 			logger.Errorf("VAD model file not found, model_path=%s", cfg.VAD.SileroVAD.ModelPath)
 			return nil, fmt.Errorf("VAD model file not found: %s", cfg.VAD.SileroVAD.ModelPath)
 		}
 	}
 
-	// 使用工厂创建VAD池
+	// Use factory to create VAD pool
 	vadPool, err = vadFactory.CreateVADPool()
 	if err != nil {
 		logger.Errorf("Failed to create VAD pool: %v", err)
 		return nil, fmt.Errorf("failed to create VAD pool: %v", err)
 	}
 
-	// 初始化VAD池
+	// Initialize VAD pool
 	logger.Infof("🔧 Initializing VAD pool... pool_size=%d", cfg.VAD.PoolSize)
 	if err := vadPool.Initialize(); err != nil {
 		logger.Errorf("Failed to initialize VAD pool: %v", err)
 		return nil, fmt.Errorf("failed to initialize VAD pool: %v", err)
 	}
 
-	// 初始化会话管理器
+	// Initialize session manager with explicit dependencies
 	logger.Infof("🔧 Initializing session manager...")
-	sessionManager := session.NewManager(globalRecognizer, vadPool)
+	sessionManager := session.NewManager(cfg, globalRecognizer, vadPool)
 
-	// 注册配置热加载回调
-	registerHotReloadCallbacks(hotReloadMgr)
+	// Register hot reload callbacks
+	registerHotReloadCallbacks(hotReloadMgr, cfg)
 
-	// 初始化速率限制器
-	logger.Infof("🔧 Initializing rate limiter... requests_per_second=%d, max_connections=%d", cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.MaxConnections)
+	// Initialize rate limiter
+	logger.Infof("🔧 Initializing rate limiter... requests_per_second=%d, max_connections=%d",
+		cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.MaxConnections)
 	rateLimiter := middleware.NewRateLimiter(
 		cfg.RateLimit.Enabled,
 		cfg.RateLimit.RequestsPerSecond,
@@ -137,7 +142,7 @@ func InitApp(cfg *config.Config) (*AppDependencies, error) {
 		cfg.RateLimit.MaxConnections,
 	)
 
-	// 初始化声纹识别模块
+	// Initialize speaker recognition module
 	var speakerManager *speaker.Manager
 	var speakerHandler *speaker.Handler
 	if cfg.Speaker.Enabled {
@@ -152,7 +157,7 @@ func InitApp(cfg *config.Config) (*AppDependencies, error) {
 			mgr, err := speaker.NewManager(speakerConfig)
 			if err == nil {
 				speakerManager = mgr
-				speakerHandler = speaker.NewHandler(speakerManager)
+				speakerHandler = speaker.NewHandler(speakerManager, cfg)
 			} else {
 				logger.Warnf("Failed to initialize speaker recognition module, continuing without it: %v", err)
 			}
@@ -163,6 +168,7 @@ func InitApp(cfg *config.Config) (*AppDependencies, error) {
 
 	logger.Infof("✅ All components initialized successfully")
 	return &AppDependencies{
+		Config:           cfg,
 		SessionManager:   sessionManager,
 		VADPool:          vadPool,
 		RateLimiter:      rateLimiter,

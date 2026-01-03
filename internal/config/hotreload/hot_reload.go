@@ -5,23 +5,33 @@ import (
 	"sync"
 	"time"
 
-	"asr_server/config"
 	"asr_server/internal/logger"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/spf13/viper"
 )
 
-// HotReloadManager 配置热加载管理器
+const (
+	// DefaultDebounceDuration is the default debounce duration for config changes
+	DefaultDebounceDuration = 2 * time.Second
+)
+
+// ReloadFunc is the function type for reload callbacks
+type ReloadFunc func() error
+
+// HotReloadManager handles configuration hot reloading with file watching.
+// Note: In a fully immutable config system, hot reload would need to
+// propagate new config instances through the dependency graph.
 type HotReloadManager struct {
-	mu            sync.RWMutex
-	callbacks     map[string][]func()
-	watcher       *fsnotify.Watcher
-	debounceTimer *time.Timer
-	stopChan      chan struct{}
+	mu               sync.RWMutex
+	callbacks        map[string][]func()
+	watcher          *fsnotify.Watcher
+	debounceTimer    *time.Timer
+	debounceDuration time.Duration
+	stopChan         chan struct{}
+	configPath       string
 }
 
-// NewHotReloadManager 创建新的热加载管理器
+// NewHotReloadManager creates a new hot reload manager instance
 func NewHotReloadManager() (*HotReloadManager, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -29,15 +39,23 @@ func NewHotReloadManager() (*HotReloadManager, error) {
 	}
 
 	manager := &HotReloadManager{
-		callbacks: make(map[string][]func()),
-		watcher:   watcher,
-		stopChan:  make(chan struct{}),
+		callbacks:        make(map[string][]func()),
+		watcher:          watcher,
+		debounceDuration: DefaultDebounceDuration,
+		stopChan:         make(chan struct{}),
 	}
 
 	return manager, nil
 }
 
-// RegisterCallback 注册配置变更回调
+// SetDebounceDuration sets the debounce duration for config changes
+func (m *HotReloadManager) SetDebounceDuration(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.debounceDuration = d
+}
+
+// RegisterCallback registers a callback for configuration changes
 func (m *HotReloadManager) RegisterCallback(configKey string, callback func()) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -48,21 +66,27 @@ func (m *HotReloadManager) RegisterCallback(configKey string, callback func()) {
 	m.callbacks[configKey] = append(m.callbacks[configKey], callback)
 }
 
-// StartWatching 开始监听配置文件
+// UnregisterCallbacks removes all callbacks for a specific config key
+func (m *HotReloadManager) UnregisterCallbacks(configKey string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.callbacks, configKey)
+}
+
+// StartWatching begins monitoring the configuration file for changes
 func (m *HotReloadManager) StartWatching(configPath string) error {
-	// 添加配置文件到监听列表
+	m.configPath = configPath
 	if err := m.watcher.Add(configPath); err != nil {
 		return fmt.Errorf("failed to watch config file: %w", err)
 	}
 
-	// 启动监听协程
 	go m.watchLoop()
 
 	logger.Infof("🔍 Started watching config file: %s", configPath)
 	return nil
 }
 
-// watchLoop 监听循环
+// watchLoop is the main event loop for file system events
 func (m *HotReloadManager) watchLoop() {
 	defer m.watcher.Close()
 
@@ -81,41 +105,34 @@ func (m *HotReloadManager) watchLoop() {
 	}
 }
 
-// handleConfigChange 处理配置文件变更
+// handleConfigChange handles file change events with debouncing
 func (m *HotReloadManager) handleConfigChange() {
-	// 防抖动处理
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.debounceTimer != nil {
 		m.debounceTimer.Stop()
 	}
 
-	m.debounceTimer = time.AfterFunc(2*time.Second, func() {
-		m.reloadConfig()
+	m.debounceTimer = time.AfterFunc(m.debounceDuration, func() {
+		m.notifyCallbacks()
 	})
 }
 
-// reloadConfig 重新加载配置
-func (m *HotReloadManager) reloadConfig() {
-	logger.Infof("🔄 Reloading configuration...")
+// notifyCallbacks notifies all registered callbacks about config change
+func (m *HotReloadManager) notifyCallbacks() {
+	logger.Infof("🔄 Configuration file changed...")
 
-	// 重新读取配置文件
-	if err := viper.ReadInConfig(); err != nil {
-		logger.Errorf("❌ Failed to read config file: %v", err)
-		return
-	}
+	// Note: In a fully immutable config system, this would:
+	// 1. Reload the config file
+	// 2. Create a new Config instance
+	// 3. Propagate it through the dependency graph
+	// For now, we just notify callbacks that config has changed
 
-	// 重新解析配置
-	if err := viper.Unmarshal(&config.GlobalConfig); err != nil {
-		logger.Errorf("❌ Failed to unmarshal config: %v", err)
-		return
-	}
-
-	logger.Infof("✅ Configuration reloaded successfully")
-
-	// 执行回调函数
 	m.executeCallbacks()
 }
 
-// executeCallbacks 执行回调函数
+// executeCallbacks runs all registered callbacks after config reload
 func (m *HotReloadManager) executeCallbacks() {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -123,7 +140,6 @@ func (m *HotReloadManager) executeCallbacks() {
 	for configKey, callbacks := range m.callbacks {
 		logger.Infof("🔄 Executing callbacks for config key: %s", configKey)
 		for _, callback := range callbacks {
-			// 在goroutine中执行回调，避免阻塞
 			go func(cb func()) {
 				defer func() {
 					if r := recover(); r != nil {
@@ -136,35 +152,18 @@ func (m *HotReloadManager) executeCallbacks() {
 	}
 }
 
-// Stop 停止监听
+// Stop gracefully stops the hot reload manager
 func (m *HotReloadManager) Stop() {
 	close(m.stopChan)
+
+	m.mu.Lock()
 	if m.debounceTimer != nil {
 		m.debounceTimer.Stop()
 	}
+	m.mu.Unlock()
 }
 
-// GetConfigValue 获取配置值
-func (m *HotReloadManager) GetConfigValue(key string) interface{} {
-	return viper.Get(key)
-}
-
-// SetConfigValue 设置配置值
-func (m *HotReloadManager) SetConfigValue(key string, value interface{}) error {
-	viper.Set(key, value)
-
-	// 重新解析到结构体
-	if err := viper.Unmarshal(&config.GlobalConfig); err != nil {
-		return fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
-	// 执行相关回调
-	m.executeCallbacks()
-
-	return nil
-}
-
-// SaveConfig 保存配置到文件
-func (m *HotReloadManager) SaveConfig() error {
-	return viper.WriteConfig()
+// GetConfigPath returns the path of the watched config file
+func (m *HotReloadManager) GetConfigPath() string {
+	return m.configPath
 }

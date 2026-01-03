@@ -16,45 +16,46 @@ import (
 )
 
 func main() {
-
-	// 加载配置
-	if err := config.InitConfig("config.json"); err != nil {
-		logger.Errorf("Failed to load configuration:%v", err)
+	// Load configuration - returns immutable config instance
+	cfg, err := config.Load("config.json")
+	if err != nil {
+		// Use fmt here since logger isn't initialized yet
+		fmt.Fprintf(os.Stderr, "❌ Failed to load configuration: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 设置日志级别
+	// Initialize logger with config
 	logger.InitLoggerFromConfig(logger.LoggingConfig{
-		Level:      config.GlobalConfig.Logging.Level,
-		Format:     config.GlobalConfig.Logging.Format,
-		Output:     config.GlobalConfig.Logging.Output,
-		FilePath:   config.GlobalConfig.Logging.FilePath,
-		MaxSize:    config.GlobalConfig.Logging.MaxSize,
-		MaxBackups: config.GlobalConfig.Logging.MaxBackups,
-		MaxAge:     config.GlobalConfig.Logging.MaxAge,
-		Compress:   config.GlobalConfig.Logging.Compress,
+		Level:      cfg.Logging.Level,
+		Format:     cfg.Logging.Format,
+		Output:     cfg.Logging.Output,
+		FilePath:   cfg.Logging.FilePath,
+		MaxSize:    cfg.Logging.MaxSize,
+		MaxBackups: cfg.Logging.MaxBackups,
+		MaxAge:     cfg.Logging.MaxAge,
+		Compress:   cfg.Logging.Compress,
 	})
 	logger.Infof("✅ Configuration loaded")
-	config.PrintConfig()
+	cfg.Print()
 
-	// 初始化所有依赖
-	deps, err := bootstrap.InitApp(&config.GlobalConfig)
+	// Initialize all dependencies with explicit config injection
+	deps, err := bootstrap.InitApp(cfg)
 	if err != nil {
-		logger.Errorf("Failed to initialize app dependencies:%v", err)
+		logger.Errorf("❌ Failed to initialize app dependencies: %v", err)
 		os.Exit(1)
 	}
 
-	// 统一注册所有路由
+	// Setup router with dependencies
 	r := router.NewRouter(deps)
 
-	// 创建HTTP服务器
+	// Create HTTP server
 	server := &http.Server{
-		Addr:        fmt.Sprintf("%s:%d", config.GlobalConfig.Server.Host, config.GlobalConfig.Server.Port),
+		Addr:        cfg.Addr(),
 		Handler:     deps.RateLimiter.Middleware(r),
-		ReadTimeout: time.Duration(config.GlobalConfig.Server.ReadTimeout) * time.Second,
+		ReadTimeout: time.Duration(cfg.Server.ReadTimeout) * time.Second,
 	}
 
-	// 优雅关闭
+	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -63,19 +64,20 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
-			logger.Errorf("Server forced to shutdown:%v", err)
+			logger.Errorf("Server forced to shutdown: %v", err)
 		}
 		logger.Infof("✅ Server shutdown complete")
 	}()
 
-	logger.Infof("🌐 Listening on %s:%d", config.GlobalConfig.Server.Host, config.GlobalConfig.Server.Port)
-	logger.Infof("🔗 WebSocket: ws://%s:%d/ws", config.GlobalConfig.Server.Host, config.GlobalConfig.Server.Port)
-	logger.Infof("📊 Health check: http://%s:%d/health", config.GlobalConfig.Server.Host, config.GlobalConfig.Server.Port)
-	logger.Infof("📈 Statistics: http://%s:%d/stats", config.GlobalConfig.Server.Host, config.GlobalConfig.Server.Port)
-	logger.Infof("🧪 Test page: http://%s:%d/", config.GlobalConfig.Server.Host, config.GlobalConfig.Server.Port)
+	// Log startup information
+	logger.Infof("🌐 Listening on %s", cfg.Addr())
+	logger.Infof("🔗 WebSocket: ws://%s/ws", cfg.Addr())
+	logger.Infof("📊 Health check: http://%s/health", cfg.Addr())
+	logger.Infof("📈 Statistics: http://%s/stats", cfg.Addr())
+	logger.Infof("🧪 Test page: http://%s/", cfg.Addr())
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Errorf("Server error:%v", err)
+		logger.Errorf("❌ Server error: %v", err)
 		os.Exit(1)
 	}
 }

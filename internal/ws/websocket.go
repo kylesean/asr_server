@@ -1,44 +1,59 @@
 package ws
 
 import (
-	"asr_server/config"
-	"asr_server/internal/logger"
-	"asr_server/internal/session"
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
 	"time"
+
+	"asr_server/config"
+	"asr_server/internal/logger"
+	"asr_server/internal/session"
 
 	sherpa "github.com/k2-fsa/sherpa-onnx-go/sherpa_onnx"
 
 	"github.com/gorilla/websocket"
 )
 
-// Upgrader 用于升级 WebSocket 连接
-var Upgrader = websocket.Upgrader{
-	CheckOrigin:       func(r *http.Request) bool { return true },
-	ReadBufferSize:    config.GlobalConfig.Server.WebSocket.ReadBufferSize,
-	WriteBufferSize:   config.GlobalConfig.Server.WebSocket.WriteBufferSize,
-	EnableCompression: config.GlobalConfig.Server.WebSocket.EnableCompression,
+// Handler handles WebSocket connections with explicit dependencies
+type Handler struct {
+	cfg              *config.Config
+	sessionManager   *session.Manager
+	globalRecognizer *sherpa.OfflineRecognizer
+	upgrader         websocket.Upgrader
 }
 
-// GenerateSessionID 生成会话ID
+// NewHandler creates a new WebSocket handler with explicit dependencies
+func NewHandler(cfg *config.Config, sessionManager *session.Manager, globalRecognizer *sherpa.OfflineRecognizer) *Handler {
+	return &Handler{
+		cfg:              cfg,
+		sessionManager:   sessionManager,
+		globalRecognizer: globalRecognizer,
+		upgrader: websocket.Upgrader{
+			CheckOrigin:       func(r *http.Request) bool { return true },
+			ReadBufferSize:    cfg.Server.WebSocket.ReadBufferSize,
+			WriteBufferSize:   cfg.Server.WebSocket.WriteBufferSize,
+			EnableCompression: cfg.Server.WebSocket.EnableCompression,
+		},
+	}
+}
+
+// GenerateSessionID generates a unique session ID
 func GenerateSessionID() string {
 	bytes := make([]byte, 16)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)
 }
 
-// HandleWebSocket 处理 WebSocket 连接
-// 依赖注入 sessionManager, globalRecognizer
-func HandleWebSocket(w http.ResponseWriter, r *http.Request, sessionManager *session.Manager, globalRecognizer *sherpa.OfflineRecognizer) {
-	conn, err := Upgrader.Upgrade(w, r, nil)
+// HandleWebSocket handles WebSocket connections
+func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Errorf("WebSocket upgrade failed: %v", err)
 		return
 	}
 
-	wsConfig := config.GlobalConfig.Server.WebSocket
+	wsConfig := h.cfg.Server.WebSocket
 
 	if wsConfig.ReadTimeout > 0 {
 		conn.SetReadDeadline(time.Now().Add(time.Duration(wsConfig.ReadTimeout) * time.Second))
@@ -46,8 +61,8 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request, sessionManager *ses
 
 	sessionID := GenerateSessionID()
 
-	// 创建会话
-	sess, err := sessionManager.CreateSession(sessionID, conn)
+	// Create session
+	sess, err := h.sessionManager.CreateSession(sessionID, conn)
 	if err != nil {
 		logger.Errorf("Failed to create session, session_id=%s, error=%v", sessionID, err)
 		conn.Close()
@@ -55,13 +70,13 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request, sessionManager *ses
 	}
 
 	defer func() {
-		sessionManager.RemoveSession(sessionID)
+		h.sessionManager.RemoveSession(sessionID)
 		logger.Infof("WebSocket connection closed, session_id=%s", sessionID)
 	}()
 
 	logger.Infof("New WebSocket connection established, session_id=%s", sessionID)
 
-	// 发送连接确认
+	// Send connection confirmation
 	if sess != nil {
 		select {
 		case sess.SendQueue <- map[string]interface{}{
@@ -74,7 +89,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request, sessionManager *ses
 		}
 	}
 
-	// 处理消息
+	// Process messages
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -82,22 +97,21 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request, sessionManager *ses
 			break
 		}
 
-		// 每次收到消息都刷新读超时
+		// Refresh read timeout on each message
 		if wsConfig.ReadTimeout > 0 {
 			conn.SetReadDeadline(time.Now().Add(time.Duration(wsConfig.ReadTimeout) * time.Second))
 		}
 
-		// 检查消息大小
+		// Check message size
 		if wsConfig.MaxMessageSize > 0 && len(message) > wsConfig.MaxMessageSize {
 			logger.Warnf("Message too large, closing connection")
 			break
 		}
 
-		// 处理音频数据
+		// Process audio data
 		if len(message) > 0 {
-			if err := sessionManager.ProcessAudioData(sessionID, message); err != nil {
+			if err := h.sessionManager.ProcessAudioData(sessionID, message); err != nil {
 				logger.Errorf("Failed to process audio data, session_id=%s, error=%v", sessionID, err)
-				// 通过session的SendQueue发送错误消息
 				if sess != nil {
 					select {
 					case sess.SendQueue <- map[string]interface{}{
@@ -111,4 +125,9 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request, sessionManager *ses
 			}
 		}
 	}
+}
+
+// ServeHTTP implements http.Handler interface
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.HandleWebSocket(w, r)
 }

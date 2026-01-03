@@ -8,24 +8,27 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// NewRouter 注册所有路由，返回 *gin.Engine
+// NewRouter creates and configures the router with all routes.
+// All dependencies are explicitly injected through AppDependencies.
 func NewRouter(deps *bootstrap.AppDependencies) *gin.Engine {
 	ginRouter := gin.New()
 	ginRouter.Use(gin.Recovery())
-	// TODO: 根据需要注入 gin.Logger()
 
-	// 注册基础路由
+	// Create WebSocket handler with explicit dependencies
+	wsHandler := ws.NewHandler(deps.Config, deps.SessionManager, deps.GlobalRecognizer)
+
+	// Register base routes
 	ginRouter.GET("/ws", func(c *gin.Context) {
-		ws.HandleWebSocket(c.Writer, c.Request, deps.SessionManager, deps.GlobalRecognizer)
+		wsHandler.HandleWebSocket(c.Writer, c.Request)
 	})
 	ginRouter.GET("/health", handlers.HealthHandler(deps))
 	ginRouter.GET("/stats", handlers.StatsHandler(deps))
 
-	// 静态文件服务
+	// Static file service
 	ginRouter.Static("/static", "./static")
 	ginRouter.StaticFile("/", "./static/index.html")
 
-	// 注册声纹识别路由（如果启用）
+	// Register speaker recognition routes (if enabled)
 	if deps.SpeakerHandler != nil {
 		deps.SpeakerHandler.RegisterRoutes(ginRouter)
 	}

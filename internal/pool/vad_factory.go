@@ -9,33 +9,36 @@ import (
 	sherpa "github.com/k2-fsa/sherpa-onnx-go/sherpa_onnx"
 )
 
-// VADFactory VAD工厂
+// VADFactory creates VAD pools based on configuration.
+// Configuration is explicitly injected via constructor.
 type VADFactory struct {
+	cfg       *config.Config
 	factories map[string]VADPoolFactory
 }
 
-// NewVADFactory 创建新的VAD工厂
-func NewVADFactory() *VADFactory {
+// NewVADFactory creates a new VAD factory with explicit configuration
+func NewVADFactory(cfg *config.Config) *VADFactory {
 	factory := &VADFactory{
+		cfg:       cfg,
 		factories: make(map[string]VADPoolFactory),
 	}
 
-	// 注册支持的VAD类型
+	// Register supported VAD types
 	factory.RegisterFactory(SILERO_TYPE, &SileroVADPoolFactory{})
 	factory.RegisterFactory(TEN_VAD_TYPE, &TenVADPoolFactory{})
 
 	return factory
 }
 
-// RegisterFactory 注册VAD池工厂
+// RegisterFactory registers a VAD pool factory
 func (f *VADFactory) RegisterFactory(vadType string, factory VADPoolFactory) {
 	f.factories[vadType] = factory
 	logger.Infof("🔧 Registered VAD factory for type: %s", vadType)
 }
 
-// CreateVADPool 根据配置创建VAD池
+// CreateVADPool creates a VAD pool based on configuration
 func (f *VADFactory) CreateVADPool() (VADPoolInterface, error) {
-	vadType := config.GlobalConfig.VAD.Provider
+	vadType := f.cfg.VAD.Provider
 
 	logger.Infof("🔧 Creating VAD pool with type: %s", vadType)
 
@@ -44,15 +47,15 @@ func (f *VADFactory) CreateVADPool() (VADPoolInterface, error) {
 		return nil, fmt.Errorf("unsupported VAD type: %s", vadType)
 	}
 
-	// 根据VAD类型创建配置
-	var config interface{}
+	// Create configuration based on VAD type
+	var vadConfig interface{}
 	var err error
 
 	switch vadType {
 	case SILERO_TYPE:
-		config, err = f.createSileroConfig()
+		vadConfig, err = f.createSileroConfig()
 	case TEN_VAD_TYPE:
-		config, err = f.createTenVADConfig()
+		vadConfig, err = f.createTenVADConfig()
 	default:
 		return nil, fmt.Errorf("unsupported VAD type: %s", vadType)
 	}
@@ -61,8 +64,8 @@ func (f *VADFactory) CreateVADPool() (VADPoolInterface, error) {
 		return nil, fmt.Errorf("failed to create config for %s: %v", vadType, err)
 	}
 
-	// 使用工厂创建池
-	pool, err := factory.CreatePool(config)
+	// Use factory to create pool
+	pool, err := factory.CreatePool(vadConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create %s VAD pool: %v", vadType, err)
 	}
@@ -70,48 +73,47 @@ func (f *VADFactory) CreateVADPool() (VADPoolInterface, error) {
 	return pool, nil
 }
 
-// createSileroConfig 创建Silero VAD配置
+// createSileroConfig creates Silero VAD configuration
 func (f *VADFactory) createSileroConfig() (*SileroVADConfig, error) {
-	// 创建VAD配置
 	vadConfig := &sherpa.VadModelConfig{
 		SileroVad: sherpa.SileroVadModelConfig{
-			Model:              config.GlobalConfig.VAD.SileroVAD.ModelPath,
-			Threshold:          config.GlobalConfig.VAD.SileroVAD.Threshold,
-			MinSilenceDuration: config.GlobalConfig.VAD.SileroVAD.MinSilenceDuration,
-			MinSpeechDuration:  config.GlobalConfig.VAD.SileroVAD.MinSpeechDuration,
-			WindowSize:         config.GlobalConfig.VAD.SileroVAD.WindowSize,
-			MaxSpeechDuration:  config.GlobalConfig.VAD.SileroVAD.MaxSpeechDuration,
+			Model:              f.cfg.VAD.SileroVAD.ModelPath,
+			Threshold:          f.cfg.VAD.SileroVAD.Threshold,
+			MinSilenceDuration: f.cfg.VAD.SileroVAD.MinSilenceDuration,
+			MinSpeechDuration:  f.cfg.VAD.SileroVAD.MinSpeechDuration,
+			WindowSize:         f.cfg.VAD.SileroVAD.WindowSize,
+			MaxSpeechDuration:  f.cfg.VAD.SileroVAD.MaxSpeechDuration,
 		},
-		SampleRate: config.GlobalConfig.Audio.SampleRate,
-		NumThreads: config.GlobalConfig.Recognition.NumThreads,
-		Provider:   config.GlobalConfig.Recognition.Provider,
+		SampleRate: f.cfg.Audio.SampleRate,
+		NumThreads: f.cfg.Recognition.NumThreads,
+		Provider:   f.cfg.Recognition.Provider,
 		Debug:      0,
 	}
 
 	return &SileroVADConfig{
 		ModelConfig:       vadConfig,
-		BufferSizeSeconds: config.GlobalConfig.VAD.SileroVAD.BufferSizeSeconds,
-		PoolSize:          config.GlobalConfig.VAD.PoolSize,
-		MaxIdle:           0, // 暂时不支持MaxIdle
+		BufferSizeSeconds: f.cfg.VAD.SileroVAD.BufferSizeSeconds,
+		PoolSize:          f.cfg.VAD.PoolSize,
+		MaxIdle:           0,
 	}, nil
 }
 
-// createTenVADConfig 创建TEN-VAD配置
+// createTenVADConfig creates TEN-VAD configuration
 func (f *VADFactory) createTenVADConfig() (*TenVADConfig, error) {
 	return &TenVADConfig{
-		HopSize:   config.GlobalConfig.VAD.TenVAD.HopSize,
-		Threshold: config.GlobalConfig.VAD.Threshold,
-		PoolSize:  config.GlobalConfig.VAD.PoolSize,
-		MaxIdle:   0, // 暂时不支持MaxIdle
+		HopSize:   f.cfg.VAD.TenVAD.HopSize,
+		Threshold: f.cfg.VAD.Threshold,
+		PoolSize:  f.cfg.VAD.PoolSize,
+		MaxIdle:   0,
 	}, nil
 }
 
-// GetVADType 获取当前VAD类型
+// GetVADType returns the current VAD type from configuration
 func (f *VADFactory) GetVADType() string {
-	return config.GlobalConfig.VAD.Provider
+	return f.cfg.VAD.Provider
 }
 
-// GetSupportedTypes 获取支持的VAD类型
+// GetSupportedTypes returns all supported VAD types
 func (f *VADFactory) GetSupportedTypes() []string {
 	types := make([]string, 0, len(f.factories))
 	for vadType := range f.factories {
@@ -120,12 +122,12 @@ func (f *VADFactory) GetSupportedTypes() []string {
 	return types
 }
 
-// SileroVADPoolFactory Silero VAD池工厂
+// SileroVADPoolFactory creates Silero VAD pools
 type SileroVADPoolFactory struct{}
 
-// CreatePool 创建Silero VAD池
-func (f *SileroVADPoolFactory) CreatePool(config interface{}) (VADPoolInterface, error) {
-	sileroConfig, ok := config.(*SileroVADConfig)
+// CreatePool creates a Silero VAD pool
+func (f *SileroVADPoolFactory) CreatePool(cfg interface{}) (VADPoolInterface, error) {
+	sileroConfig, ok := cfg.(*SileroVADConfig)
 	if !ok {
 		return nil, fmt.Errorf("invalid config type for Silero VAD")
 	}
@@ -134,17 +136,17 @@ func (f *SileroVADPoolFactory) CreatePool(config interface{}) (VADPoolInterface,
 	return pool, nil
 }
 
-// GetSupportedTypes 获取支持的VAD类型
+// GetSupportedTypes returns supported VAD types
 func (f *SileroVADPoolFactory) GetSupportedTypes() []string {
 	return []string{SILERO_TYPE}
 }
 
-// TenVADPoolFactory TEN-VAD池工厂
+// TenVADPoolFactory creates TEN-VAD pools
 type TenVADPoolFactory struct{}
 
-// CreatePool 创建TEN-VAD池
-func (f *TenVADPoolFactory) CreatePool(config interface{}) (VADPoolInterface, error) {
-	tenVADConfig, ok := config.(*TenVADConfig)
+// CreatePool creates a TEN-VAD pool
+func (f *TenVADPoolFactory) CreatePool(cfg interface{}) (VADPoolInterface, error) {
+	tenVADConfig, ok := cfg.(*TenVADConfig)
 	if !ok {
 		return nil, fmt.Errorf("invalid config type for TEN-VAD")
 	}
@@ -153,7 +155,7 @@ func (f *TenVADPoolFactory) CreatePool(config interface{}) (VADPoolInterface, er
 	return pool, nil
 }
 
-// GetSupportedTypes 获取支持的VAD类型
+// GetSupportedTypes returns supported VAD types
 func (f *TenVADPoolFactory) GetSupportedTypes() []string {
 	return []string{TEN_VAD_TYPE}
 }
