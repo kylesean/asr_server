@@ -14,7 +14,11 @@ import (
 func NewRouter(deps *bootstrap.AppDependencies) *gin.Engine {
 	ginRouter := gin.New()
 
-	// Use custom structured logger and standard recovery
+	// Middleware order is important:
+	// 1. RequestID must come first to generate request_id
+	// 2. Logger uses the request_id for traceability
+	// 3. Recovery handles panics
+	ginRouter.Use(middleware.RequestID())
 	ginRouter.Use(middleware.Logger())
 	ginRouter.Use(gin.Recovery())
 

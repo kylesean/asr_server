@@ -1,9 +1,12 @@
 package logger
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
+	"runtime"
+	"strings"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -13,6 +16,15 @@ var (
 	levelVar     *slog.LevelVar // For dynamic log level changes
 	outputCloser io.Closer      // To handle graceful shutdown of log files
 )
+
+// Sensitive keywords for automatic redaction
+var sensitiveKeywords = []string{
+	"password", "passwd", "pwd",
+	"secret", "private", "privatekey",
+	"key", "apikey", "api_key",
+	"token", "auth", "authorization",
+	"credential", "cred",
+}
 
 // InitLogger initializes the logging system with rotation and multiple outputs.
 func InitLogger(level slog.Level, format, output, filePath string, maxSize, maxBackups, maxAge int, compress bool) {
@@ -39,9 +51,21 @@ func InitLogger(level slog.Level, format, output, filePath string, maxSize, maxB
 
 	mw := io.MultiWriter(writers...)
 
-	var handler slog.Handler
-	opts := &slog.HandlerOptions{Level: levelVar}
+	// Configure handler options
+	opts := &slog.HandlerOptions{
+		Level: levelVar,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Simplify time format for better readability
+			if a.Key == slog.TimeKey {
+				t := a.Value.Time()
+				return slog.String("time", t.Format("2006-01-02T15:04:05.000Z07:00"))
+			}
+			// Automatically redact sensitive information
+			return sanitizeAttr(a)
+		},
+	}
 
+	var handler slog.Handler
 	if format == "json" {
 		handler = slog.NewJSONHandler(mw, opts)
 	} else {
@@ -121,4 +145,92 @@ func Debug(msg string, args ...any) {
 	if Logger != nil {
 		Logger.Debug(msg, args...)
 	}
+}
+
+// ErrorWithStack logs an error with stack trace information.
+// Use this for critical errors where you need to know the call path.
+func ErrorWithStack(msg string, err error, args ...any) {
+	if Logger != nil {
+		// Add stack trace to args
+		allArgs := append(args, "error", err, "stack", captureStack(3))
+		Logger.Error(msg, allArgs...)
+	}
+}
+
+// WarnWithContext logs a warning with context information.
+func WarnWithContext(ctx context.Context, msg string, args ...any) {
+	if Logger != nil {
+		Logger.WarnContext(ctx, msg, args...)
+	}
+}
+
+// InfoWithContext logs info with context information.
+func InfoWithContext(ctx context.Context, msg string, args ...any) {
+	if Logger != nil {
+		Logger.InfoContext(ctx, msg, args...)
+	}
+}
+
+// captureStack captures the current stack trace.
+func captureStack(skip int) string {
+	buf := make([]byte, 4096)
+	n := runtime.Stack(buf, false)
+	// Parse stack to remove unnecessary frames
+	stack := string(buf[:n])
+	lines := strings.Split(stack, "\n")
+	if len(lines) > skip*2 {
+		// Skip the first few frames (this function and runtime)
+		lines = lines[skip*2:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// sanitizeAttr checks if an attribute contains sensitive information and redacts it.
+func sanitizeAttr(a slog.Attr) slog.Attr {
+	keyLower := strings.ToLower(a.Key)
+
+	// Check if key contains sensitive keywords
+	for _, keyword := range sensitiveKeywords {
+		if strings.Contains(keyLower, keyword) {
+			return slog.String(a.Key, "[REDACTED]")
+		}
+	}
+
+	// Handle nested groups
+	if a.Value.Kind() == slog.KindGroup {
+		attrs := a.Value.Group()
+		sanitized := make([]slog.Attr, len(attrs))
+		for i, attr := range attrs {
+			sanitized[i] = sanitizeAttr(attr)
+		}
+		return slog.Group(a.Key, toAny(sanitized)...)
+	}
+
+	return a
+}
+
+// toAny converts []slog.Attr to []any for slog.Group
+func toAny(attrs []slog.Attr) []any {
+	result := make([]any, len(attrs))
+	for i, attr := range attrs {
+		result[i] = attr
+	}
+	return result
+}
+
+// WithRequestID creates a child logger with request_id attached.
+// This is useful for tracking all logs from the same request.
+func WithRequestID(requestID string) *slog.Logger {
+	if Logger != nil {
+		return Logger.With(slog.String("request_id", requestID))
+	}
+	return nil
+}
+
+// WithFields creates a child logger with additional fields.
+func WithFields(fields ...any) *slog.Logger {
+	if Logger != nil {
+		return Logger.With(fields...)
+	}
+	return nil
 }

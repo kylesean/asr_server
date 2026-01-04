@@ -96,7 +96,7 @@ func NewManager(config *Config) (*Manager, error) {
 
 	// 加载现有数据库
 	if err := manager.loadDatabase(); err != nil {
-		logger.Info("failed_to_load_speaker_database", "error", err)
+		logger.Warn("failed_to_load_speaker_database_using_defaults", "error", err)
 		manager.database = &SpeakerDatabase{
 			Speakers:  make(map[string]*SpeakerData),
 			Version:   "1.0.0",
@@ -106,7 +106,7 @@ func NewManager(config *Config) (*Manager, error) {
 
 	// 将数据库中的声纹加载到内存管理器
 	if err := manager.loadSpeakersToMemory(); err != nil {
-		logger.Info("failed_to_load_speakers_to_memory", "error", err)
+		logger.Warn("failed_to_load_speakers_to_memory", "error", err)
 	}
 
 	return manager, nil
@@ -168,7 +168,7 @@ func (m *Manager) loadSpeakersToMemory() error {
 			// 注册多个嵌入向量
 			success := m.manager.RegisterV(speakerID, speakerData.Embeddings)
 			if !success {
-				logger.Info("failed_to_register_speaker_to_memory", "speaker_id", speakerID)
+				logger.Warn("failed_to_register_speaker_to_memory", "speaker_id", speakerID)
 			} else {
 				loadedCount++
 				totalEmbeddings += len(speakerData.Embeddings)
