@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"asr_server/config"
-	"asr_server/internal/config/hotreload"
 	"asr_server/internal/logger"
 	"asr_server/internal/middleware"
 	"asr_server/internal/pool"
@@ -25,7 +24,7 @@ type AppDependencies struct {
 	SpeakerManager   *speaker.Manager
 	SpeakerHandler   *speaker.Handler
 	GlobalRecognizer *sherpa.OfflineRecognizer
-	HotReloadMgr     *hotreload.HotReloadManager
+	HotReloadMgr     *config.HotReloadManager
 }
 
 // createRecognizer initializes the sherpa offline recognizer
@@ -51,53 +50,28 @@ func createRecognizer(cfg *config.Config) (*sherpa.OfflineRecognizer, error) {
 	return recognizer, nil
 }
 
-// registerHotReloadCallbacks registers configuration hot reload callbacks
-func registerHotReloadCallbacks(hotReloadMgr *hotreload.HotReloadManager, cfg *config.Config, configPath string) {
-	if hotReloadMgr == nil {
-		return
-	}
-
-	hotReloadMgr.RegisterCallback("logging.level", func() {
-		if err := cfg.Reload(configPath); err != nil {
-			logger.Error("failed_to_reload_config_on_hot_reload", "error", err)
-			return
-		}
-		newLevel := cfg.Logging.Level
-		logger.SetLevel(newLevel)
-		logger.Info("log_level_changed_dynamically", "new_level", newLevel)
-	})
-	hotReloadMgr.RegisterCallback("vad", func() {
-		cfg.Reload(configPath)
-		logger.Info("vad_configuration_changed")
-	})
-	hotReloadMgr.RegisterCallback("session", func() {
-		cfg.Reload(configPath)
-		logger.Info("session_configuration_changed")
-	})
-	hotReloadMgr.RegisterCallback("rate_limit", func() {
-		cfg.Reload(configPath)
-		logger.Info("rate_limit_configuration_changed")
-	})
-	hotReloadMgr.RegisterCallback("response", func() {
-		cfg.Reload(configPath)
-		logger.Info("response_configuration_changed")
-	})
-	logger.Info("hot_reload_callbacks_registered")
-}
-
 // InitApp initializes all core components and returns the dependency container.
 // All dependencies are explicitly created with the provided configuration.
-func InitApp(cfg *config.Config) (*AppDependencies, error) {
+func InitApp(cfg *config.Config, configPath string) (*AppDependencies, error) {
 	logger.Info("initializing_components")
 
-	// Initialize hot reload manager
+	// Initialize hot reload manager using Viper's built-in file watching
 	logger.Info("initializing_hot_reload_manager")
-	hotReloadMgr, err := hotreload.NewHotReloadManager()
-	if err != nil {
-		logger.Error("failed_to_initialize_hot_reload_manager", "error", err)
-		return nil, fmt.Errorf("failed to initialize hot reload manager: %v", err)
-	}
-	if err := hotReloadMgr.StartWatching("config.json"); err != nil {
+	hotReloadMgr := config.NewHotReloadManager(cfg, configPath)
+
+	// Register configuration change callback
+	hotReloadMgr.OnChange(func(newCfg *config.Config) {
+		// Update log level dynamically
+		logger.SetLevel(newCfg.Logging.Level)
+		logger.Info("configuration_reloaded",
+			"log_level", newCfg.Logging.Level,
+			"vad_provider", newCfg.VAD.Provider,
+			"rate_limit_enabled", newCfg.RateLimit.Enabled,
+		)
+	})
+
+	// Start watching config file
+	if err := hotReloadMgr.StartWatching(); err != nil {
 		logger.Warn("failed_to_start_config_file_watching", "error", err)
 	}
 
@@ -138,9 +112,6 @@ func InitApp(cfg *config.Config) (*AppDependencies, error) {
 	// Initialize session manager with explicit dependencies
 	logger.Info("initializing_session_manager")
 	sessionManager := session.NewManager(cfg, globalRecognizer, vadPool)
-
-	// Register hot reload callbacks
-	registerHotReloadCallbacks(hotReloadMgr, cfg, "config.json")
 
 	// Initialize rate limiter
 	logger.Info("initializing_rate_limiter",

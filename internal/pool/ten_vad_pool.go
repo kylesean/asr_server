@@ -151,7 +151,7 @@ func (p *TenVADPool) Initialize() error {
 			select {
 			case p.available <- instance:
 				atomic.AddInt64(&p.totalCreated, 1)
-				logger.Info("ten_vad_instance_initialized", "id", instanceID)
+				logger.Debug("ten_vad_instance_initialized", "id", instanceID)
 			default:
 				// 队列满，销毁实例
 				tenVAD.DestroyInstance(handle)

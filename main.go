@@ -45,7 +45,7 @@ func main() {
 	logger.Info("configuration_loaded", "config", cfg.ToSafeMap())
 
 	// Initialize all dependencies with explicit config injection
-	deps, err := bootstrap.InitApp(cfg)
+	deps, err := bootstrap.InitApp(cfg, configFile)
 	if err != nil {
 		logger.Error("failed_to_initialize_app_dependencies", "error", err)
 		os.Exit(1)

@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 )
 
@@ -74,6 +77,9 @@ const (
 	// Port constraints
 	MinPort = 1
 	MaxPort = 65535
+
+	// Hot reload settings
+	DefaultDebounceDuration = 2 * time.Second
 )
 
 // Valid value sets for validation
@@ -619,4 +625,142 @@ func (c *Config) Reload(configPath string) error {
 // Addr returns the server address in "host:port" format
 func (c *Config) Addr() string {
 	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
+}
+
+// ============================================================================
+// Hot Reload Manager
+// ============================================================================
+
+// ConfigChangeCallback is the function type for configuration change callbacks.
+type ConfigChangeCallback func(cfg *Config)
+
+// HotReloadManager handles configuration hot reloading using Viper's built-in
+// file watching capability. This is the recommended approach in the Go community.
+type HotReloadManager struct {
+	mu               sync.RWMutex
+	v                *viper.Viper
+	cfg              *Config
+	configPath       string
+	callbacks        []ConfigChangeCallback
+	debounceDuration time.Duration
+	debounceTimer    *time.Timer
+	stopChan         chan struct{}
+}
+
+// NewHotReloadManager creates a new hot reload manager for the given config.
+func NewHotReloadManager(cfg *Config, configPath string) *HotReloadManager {
+	return &HotReloadManager{
+		cfg:              cfg,
+		configPath:       configPath,
+		callbacks:        make([]ConfigChangeCallback, 0),
+		debounceDuration: DefaultDebounceDuration,
+		stopChan:         make(chan struct{}),
+	}
+}
+
+// SetDebounceDuration sets the debounce duration for config changes.
+func (m *HotReloadManager) SetDebounceDuration(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.debounceDuration = d
+}
+
+// OnChange registers a callback to be called when configuration changes.
+// The callback receives the new configuration after validation.
+func (m *HotReloadManager) OnChange(callback ConfigChangeCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.callbacks = append(m.callbacks, callback)
+}
+
+// StartWatching begins monitoring the configuration file for changes.
+// Uses Viper's built-in fsnotify integration.
+func (m *HotReloadManager) StartWatching() error {
+	v := viper.New()
+	m.v = v
+
+	// Configure viper
+	v.SetConfigFile(m.configPath)
+	v.SetEnvPrefix(EnvPrefix)
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	// Set defaults
+	setDefaults(v)
+
+	// Read initial config
+	if err := v.ReadInConfig(); err != nil {
+		return fmt.Errorf("failed to read config for watching: %w", err)
+	}
+
+	// Set up file watching with Viper's built-in support
+	v.OnConfigChange(func(e fsnotify.Event) {
+		m.handleConfigChange()
+	})
+	v.WatchConfig()
+
+	fmt.Printf("🔍 Started watching config file: %s\n", m.configPath)
+	return nil
+}
+
+// handleConfigChange handles file change events with debouncing.
+func (m *HotReloadManager) handleConfigChange() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Cancel previous timer if exists
+	if m.debounceTimer != nil {
+		m.debounceTimer.Stop()
+	}
+
+	// Set new debounce timer
+	m.debounceTimer = time.AfterFunc(m.debounceDuration, func() {
+		m.reloadAndNotify()
+	})
+}
+
+// reloadAndNotify reloads the configuration and notifies all callbacks.
+func (m *HotReloadManager) reloadAndNotify() {
+	fmt.Println("🔄 Configuration file changed, reloading...")
+
+	// Reload configuration
+	if err := m.cfg.Reload(m.configPath); err != nil {
+		fmt.Printf("❌ Failed to reload configuration: %v\n", err)
+		return
+	}
+
+	fmt.Println("✅ Configuration reloaded successfully")
+
+	// Notify all callbacks
+	m.mu.RLock()
+	callbacks := make([]ConfigChangeCallback, len(m.callbacks))
+	copy(callbacks, m.callbacks)
+	m.mu.RUnlock()
+
+	for _, callback := range callbacks {
+		go func(cb ConfigChangeCallback) {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("❌ Config callback panicked: %v\n", r)
+				}
+			}()
+			cb(m.cfg)
+		}(callback)
+	}
+}
+
+// Stop gracefully stops the hot reload manager.
+func (m *HotReloadManager) Stop() {
+	close(m.stopChan)
+
+	m.mu.Lock()
+	if m.debounceTimer != nil {
+		m.debounceTimer.Stop()
+	}
+	m.mu.Unlock()
+}
+
+// GetConfigPath returns the path of the watched config file.
+func (m *HotReloadManager) GetConfigPath() string {
+	return m.configPath
 }
