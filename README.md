@@ -38,7 +38,32 @@ docker run -d -p 6000:6000 --name asr_server asr_server
 
 ---
 
-### 方式二：源码部署（进阶/开发者）
+### 方式二：本地开发（推荐给开发者）
+
+适合需要调试、开发新功能或不想使用 Docker 的场景。
+
+```bash
+# 1. 给脚本添加执行权限
+chmod +x dev.sh scripts/download_models.sh
+
+# 2. 下载模型文件（首次运行）
+./scripts/download_models.sh
+
+# 3. 启动开发服务器
+./dev.sh
+```
+
+**特点：**
+- 📝 使用统一配置 (config.json)
+- 🔧 自动配置库路径
+- 🔍 自动检查模型文件
+- ⚡ 开发和生产环境一致
+
+**详细文档**: [本地开发指南](docs/LOCAL_DEVELOPMENT.md)
+
+---
+
+### 方式三：源码部署（进阶/开发者）
 
 #### 系统要求
 - Go 1.21+

@@ -17,7 +17,13 @@ import (
 
 func main() {
 	// Load configuration - returns immutable config instance
-	cfg, err := config.Load("config.json")
+	// Support CONFIG_FILE environment variable for flexible config loading
+	configFile := os.Getenv("CONFIG_FILE")
+	if configFile == "" {
+		configFile = "config.json"
+	}
+
+	cfg, err := config.Load(configFile)
 	if err != nil {
 		// Use fmt here since logger isn't initialized yet
 		fmt.Fprintf(os.Stderr, "❌ Failed to load configuration: %v\n", err)

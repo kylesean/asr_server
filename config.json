@@ -1,6 +1,6 @@
 {
   "server": {
-    "port": 6000,
+    "port": 8080,
     "host": "0.0.0.0",
     "read_timeout": 20,
     "websocket": {
@@ -19,7 +19,7 @@
     "provider": "ten_vad",
     "pool_size": 200,
     "threshold": 0.5,
-    "silero_vad":{
+    "silero_vad": {
       "model_path": "models/vad/silero_vad/silero_vad.onnx",
       "min_silence_duration": 0.1,
       "min_speech_duration": 0.25,
@@ -27,11 +27,11 @@
       "window_size": 512,
       "buffer_size_seconds": 10.0
     },
-    "ten_vad":{
-        "hop_size": 512,
-        "min_speech_frames": 12,
-        "max_silence_frames": 5
-      }
+    "ten_vad": {
+      "hop_size": 512,
+      "min_speech_frames": 12,
+      "max_silence_frames": 5
+    }
   },
   "recognition": {
     "model_path": "models/asr/Fun-ASR-Nano-2512-8bit/model.onnx",
@@ -81,4 +81,4 @@
     "max_age": 30,
     "compress": true
   }
-} 
+}

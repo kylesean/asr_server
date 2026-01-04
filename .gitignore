@@ -4,3 +4,10 @@ logs
 data
 .vscode
 .claude
+
+# Local development
+models_cache
+*.log
+.air.toml
+tmp/
+.venv-models
