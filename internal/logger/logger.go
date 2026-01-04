@@ -1,56 +1,82 @@
 package logger
 
 import (
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
 
-	"asr_server/config"
-
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var Logger *slog.Logger
+var (
+	Logger       *slog.Logger
+	levelVar     *slog.LevelVar // For dynamic log level changes
+	outputCloser io.Closer      // To handle graceful shutdown of log files
+)
 
 // InitLogger initializes the logging system with rotation and multiple outputs.
-// This is the low-level initialization function with individual parameters.
 func InitLogger(level slog.Level, format, output, filePath string, maxSize, maxBackups, maxAge int, compress bool) {
+	// Initialize dynamic level
+	levelVar = &slog.LevelVar{}
+	levelVar.Set(level)
+
 	var writers []io.Writer
 	if output == "console" || output == "both" {
 		writers = append(writers, os.Stdout)
 	}
+
 	if output == "file" || output == "both" {
-		writers = append(writers, &lumberjack.Logger{
+		lj := &lumberjack.Logger{
 			Filename:   filePath,
 			MaxSize:    maxSize,
 			MaxBackups: maxBackups,
 			MaxAge:     maxAge,
 			Compress:   compress,
-		})
+		}
+		writers = append(writers, lj)
+		outputCloser = lj
 	}
+
 	mw := io.MultiWriter(writers...)
+
 	var handler slog.Handler
+	opts := &slog.HandlerOptions{Level: levelVar}
+
 	if format == "json" {
-		handler = slog.NewJSONHandler(mw, &slog.HandlerOptions{Level: level})
+		handler = slog.NewJSONHandler(mw, opts)
 	} else {
-		handler = slog.NewTextHandler(mw, &slog.HandlerOptions{Level: level})
+		handler = slog.NewTextHandler(mw, opts)
 	}
+
 	Logger = slog.New(handler)
 }
 
-// InitFromConfig initializes the logger directly from config.LoggingConfig.
-// This is the recommended way to initialize the logger.
-func InitFromConfig(cfg config.LoggingConfig) {
+// SetLevel dynamically updates the log level at runtime.
+func SetLevel(level string) {
+	if levelVar != nil {
+		levelVar.Set(parseSlogLevel(level))
+	}
+}
+
+// Close ensures all logs are flushed and file handles are closed.
+func Close() error {
+	if outputCloser != nil {
+		return outputCloser.Close()
+	}
+	return nil
+}
+
+// InitFromConfig initializes the logger using individual parameters to avoid package cycles.
+func InitFromConfig(level, format, output, filePath string, maxSize, maxBackups, maxAge int, compress bool) {
 	InitLogger(
-		parseSlogLevel(cfg.Level),
-		cfg.Format,
-		cfg.Output,
-		cfg.FilePath,
-		cfg.MaxSize,
-		cfg.MaxBackups,
-		cfg.MaxAge,
-		cfg.Compress,
+		parseSlogLevel(level),
+		format,
+		output,
+		filePath,
+		maxSize,
+		maxBackups,
+		maxAge,
+		compress,
 	)
 }
 
@@ -69,36 +95,30 @@ func parseSlogLevel(level string) slog.Level {
 	}
 }
 
-// Convenience functions that use the global Logger
+// Convenience functions that use the global Logger.
+// These support structured logging via key-value pairs (args... any).
+// Example: logger.Info("message", "key", value)
 
 func Info(msg string, args ...any) {
-	Logger.Info(msg, args...)
-}
-
-func Infof(format string, args ...any) {
-	Logger.Info(fmt.Sprintf(format, args...))
+	if Logger != nil {
+		Logger.Info(msg, args...)
+	}
 }
 
 func Error(msg string, args ...any) {
-	Logger.Error(msg, args...)
-}
-
-func Errorf(format string, args ...any) {
-	Logger.Error(fmt.Sprintf(format, args...))
+	if Logger != nil {
+		Logger.Error(msg, args...)
+	}
 }
 
 func Warn(msg string, args ...any) {
-	Logger.Warn(msg, args...)
-}
-
-func Warnf(format string, args ...any) {
-	Logger.Warn(fmt.Sprintf(format, args...))
+	if Logger != nil {
+		Logger.Warn(msg, args...)
+	}
 }
 
 func Debug(msg string, args ...any) {
-	Logger.Debug(msg, args...)
-}
-
-func Debugf(format string, args ...any) {
-	Logger.Debug(fmt.Sprintf(format, args...))
+	if Logger != nil {
+		Logger.Debug(msg, args...)
+	}
 }

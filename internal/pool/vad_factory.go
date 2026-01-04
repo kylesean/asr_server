@@ -33,14 +33,14 @@ func NewVADFactory(cfg *config.Config) *VADFactory {
 // RegisterFactory registers a VAD pool factory
 func (f *VADFactory) RegisterFactory(vadType string, factory VADPoolFactory) {
 	f.factories[vadType] = factory
-	logger.Infof("🔧 Registered VAD factory for type: %s", vadType)
+	logger.Info("registered_vad_factory", "type", vadType)
 }
 
 // CreateVADPool creates a VAD pool based on configuration
 func (f *VADFactory) CreateVADPool() (VADPoolInterface, error) {
 	vadType := f.cfg.VAD.Provider
 
-	logger.Infof("🔧 Creating VAD pool with type: %s", vadType)
+	logger.Info("creating_vad_pool", "type", vadType)
 
 	factory, exists := f.factories[vadType]
 	if !exists {

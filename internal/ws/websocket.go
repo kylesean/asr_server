@@ -49,7 +49,7 @@ func GenerateSessionID() string {
 func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		logger.Errorf("WebSocket upgrade failed: %v", err)
+		logger.Error("websocket_upgrade_failed", "error", err)
 		return
 	}
 
@@ -64,17 +64,17 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Create session
 	sess, err := h.sessionManager.CreateSession(sessionID, conn)
 	if err != nil {
-		logger.Errorf("Failed to create session, session_id=%s, error=%v", sessionID, err)
+		logger.Error("failed_to_create_session", "session_id", sessionID, "error", err)
 		conn.Close()
 		return
 	}
 
 	defer func() {
 		h.sessionManager.RemoveSession(sessionID)
-		logger.Infof("WebSocket connection closed, session_id=%s", sessionID)
+		logger.Info("websocket_connection_closed", "session_id", sessionID)
 	}()
 
-	logger.Infof("New WebSocket connection established, session_id=%s", sessionID)
+	logger.Info("websocket_connection_established", "session_id", sessionID)
 
 	// Send connection confirmation
 	if sess != nil {
@@ -85,7 +85,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			"session_id": sessionID,
 		}:
 		default:
-			logger.Warnf("Session send queue is full, dropping connection confirmation")
+			logger.Warn("session_send_queue_full", "session_id", sessionID, "action", "dropped_confirmation")
 		}
 	}
 
@@ -93,7 +93,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			logger.Warnf("WebSocket read error")
+			logger.Warn("websocket_read_error", "session_id", sessionID)
 			break
 		}
 
@@ -104,14 +104,14 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		// Check message size
 		if wsConfig.MaxMessageSize > 0 && len(message) > wsConfig.MaxMessageSize {
-			logger.Warnf("Message too large, closing connection")
+			logger.Warn("websocket_message_too_large", "session_id", sessionID, "size", len(message))
 			break
 		}
 
 		// Process audio data
 		if len(message) > 0 {
 			if err := h.sessionManager.ProcessAudioData(sessionID, message); err != nil {
-				logger.Errorf("Failed to process audio data, session_id=%s, error=%v", sessionID, err)
+				logger.Error("failed_to_process_audio", "session_id", sessionID, "error", err)
 				if sess != nil {
 					select {
 					case sess.SendQueue <- map[string]interface{}{
@@ -119,7 +119,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 						"message": err.Error(),
 					}:
 					default:
-						logger.Warnf("Session send queue is full, dropping error message")
+						logger.Warn("session_send_queue_full", "session_id", sessionID, "action", "dropped_error_message")
 					}
 				}
 			}

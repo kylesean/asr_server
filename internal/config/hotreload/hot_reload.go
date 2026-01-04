@@ -82,7 +82,7 @@ func (m *HotReloadManager) StartWatching(configPath string) error {
 
 	go m.watchLoop()
 
-	logger.Infof("🔍 Started watching config file: %s", configPath)
+	logger.Info("started_watching_config_file", "path", configPath)
 	return nil
 }
 
@@ -97,9 +97,9 @@ func (m *HotReloadManager) watchLoop() {
 				m.handleConfigChange()
 			}
 		case err := <-m.watcher.Errors:
-			logger.Errorf("❌ Config file watcher error: %v", err)
+			logger.Error("config_file_watcher_error", "error", err)
 		case <-m.stopChan:
-			logger.Infof("🛑 Config file watcher stopped")
+			logger.Info("config_file_watcher_stopped")
 			return
 		}
 	}
@@ -121,7 +121,7 @@ func (m *HotReloadManager) handleConfigChange() {
 
 // notifyCallbacks notifies all registered callbacks about config change
 func (m *HotReloadManager) notifyCallbacks() {
-	logger.Infof("🔄 Configuration file changed...")
+	logger.Info("configuration_file_changed")
 
 	// Note: In a fully immutable config system, this would:
 	// 1. Reload the config file
@@ -138,12 +138,12 @@ func (m *HotReloadManager) executeCallbacks() {
 	defer m.mu.RUnlock()
 
 	for configKey, callbacks := range m.callbacks {
-		logger.Infof("🔄 Executing callbacks for config key: %s", configKey)
+		logger.Info("executing_config_callbacks", "key", configKey)
 		for _, callback := range callbacks {
 			go func(cb func()) {
 				defer func() {
 					if r := recover(); r != nil {
-						logger.Errorf("❌ Callback panicked: %v", r)
+						logger.Error("config_callback_panicked", "recover", r)
 					}
 				}()
 				cb()

@@ -24,15 +24,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize logger with config
-	logger.InitFromConfig(cfg.Logging)
-	logger.Infof("✅ Configuration loaded")
-	cfg.Print()
+	// Initialize logger
+	lcfg := cfg.Logging
+	logger.InitFromConfig(
+		lcfg.Level,
+		lcfg.Format,
+		lcfg.Output,
+		lcfg.FilePath,
+		lcfg.MaxSize,
+		lcfg.MaxBackups,
+		lcfg.MaxAge,
+		lcfg.Compress,
+	)
+	logger.Info("configuration_loaded", "config", cfg.ToSafeMap())
 
 	// Initialize all dependencies with explicit config injection
 	deps, err := bootstrap.InitApp(cfg)
 	if err != nil {
-		logger.Errorf("❌ Failed to initialize app dependencies: %v", err)
+		logger.Error("failed_to_initialize_app_dependencies", "error", err)
 		os.Exit(1)
 	}
 
@@ -51,24 +60,29 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-quit
-		logger.Infof("🛑 Shutting down server...")
+		logger.Info("shutting_down_server")
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
-			logger.Errorf("Server forced to shutdown: %v", err)
+			logger.Error("server_forced_to_shutdown", "error", err)
 		}
-		logger.Infof("✅ Server shutdown complete")
+
+		// Ensure logs are flushed
+		if err := logger.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing logger: %v\n", err)
+		}
+		logger.Info("server_shutdown_complete")
 	}()
 
 	// Log startup information
-	logger.Infof("🌐 Listening on %s", cfg.Addr())
-	logger.Infof("🔗 WebSocket: ws://%s/ws", cfg.Addr())
-	logger.Infof("📊 Health check: http://%s/health", cfg.Addr())
-	logger.Infof("📈 Statistics: http://%s/stats", cfg.Addr())
-	logger.Infof("🧪 Test page: http://%s/", cfg.Addr())
+	logger.Info("server_started",
+		"addr", cfg.Addr(),
+		"websocket", fmt.Sprintf("ws://%s/ws", cfg.Addr()),
+		"health", fmt.Sprintf("http://%s/health", cfg.Addr()),
+	)
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Errorf("❌ Server error: %v", err)
+		logger.Error("server_error", "error", err)
 		os.Exit(1)
 	}
 }

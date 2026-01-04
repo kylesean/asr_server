@@ -559,13 +559,6 @@ func (c *Config) Print() {
 	fmt.Printf("  Log Level: %s\n", c.Logging.Level)
 	fmt.Printf("  Log Format: %s\n", c.Logging.Format)
 	fmt.Printf("  Log Output: %s\n", c.Logging.Output)
-	if c.Logging.Output != "console" {
-		fmt.Printf("  Log File: %s\n", c.Logging.FilePath)
-	}
-
-	// Example: If there were sensitive fields, they would be masked:
-	// fmt.Printf("  API Key: %s\n", Mask(c.SomeAPIKey))
-	// fmt.Printf("  DB Password: %s\n", MaskWithLength(c.Database.Password))
 }
 
 // PrintCompact outputs a single-line summary for log messages.
@@ -609,6 +602,18 @@ func (c *Config) ToSafeMap() map[string]interface{} {
 		// Add masked sensitive fields here when needed:
 		// "api_key": Mask(c.SomeAPIKey),
 	}
+}
+
+// Reload re-reads the configuration from the file and updates the current instance.
+// This supports hot-reloading in long-running services.
+func (c *Config) Reload(configPath string) error {
+	newCfg, err := Load(configPath)
+	if err != nil {
+		return err
+	}
+	// Copy values to the current instance (pointer stability)
+	*c = *newCfg
+	return nil
 }
 
 // Addr returns the server address in "host:port" format

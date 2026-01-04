@@ -3,6 +3,7 @@ package router
 import (
 	"asr_server/internal/bootstrap"
 	"asr_server/internal/handlers"
+	"asr_server/internal/middleware"
 	"asr_server/internal/ws"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,9 @@ import (
 // All dependencies are explicitly injected through AppDependencies.
 func NewRouter(deps *bootstrap.AppDependencies) *gin.Engine {
 	ginRouter := gin.New()
+
+	// Use custom structured logger and standard recovery
+	ginRouter.Use(middleware.Logger())
 	ginRouter.Use(gin.Recovery())
 
 	// Create WebSocket handler with explicit dependencies
