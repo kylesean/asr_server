@@ -22,7 +22,7 @@
 docker build -t asr_server .
 
 # 运行容器（VAD 模型已内置，ASR/Speaker 模型自动下载）
-docker run -d -p 6000:6000 --name asr_server asr_server
+docker run -d -p 8000:8000 --name asr_server asr_server
 ```
 
 **特点：**
@@ -32,9 +32,9 @@ docker run -d -p 6000:6000 --name asr_server asr_server
 - 适用场景：快速部署、资源受限环境
 
 #### 端口与访问
-- 测试页面: http://localhost:6000/
-- 健康检查: http://localhost:6000/health
-- WebSocket: ws://localhost:6000/ws
+- 测试页面: http://localhost:8000/
+- 健康检查: http://localhost:8000/health
+- WebSocket: ws://localhost:8000/ws
 
 ---
 
@@ -126,9 +126,9 @@ go build -o asr_server
 ```
 
 #### 访问测试
-- 测试页面: http://localhost:6000/
-- 健康检查: http://localhost:6000/health
-- WebSocket: ws://localhost:6000/ws
+- 测试页面: http://localhost:8000/
+- 健康检查: http://localhost:8000/health
+- WebSocket: ws://localhost:8000/ws
 
 ---
 
@@ -137,7 +137,7 @@ go build -o asr_server
 
 ## 🔌 WebSocket API 示例
 ```javascript
-const ws = new WebSocket('ws://localhost:6000/ws');
+const ws = new WebSocket('ws://localhost:8000/ws');
 ws.onopen = () => ws.send(audioBuffer);
 ws.onmessage = e => console.log('识别结果:', e.data);
 ```

@@ -132,115 +132,115 @@ type Config struct {
 
 // ServerConfig holds server-related configuration
 type ServerConfig struct {
-	Port           int             `mapstructure:"port"`
-	Host           string          `mapstructure:"host"`
-	MaxConnections int             `mapstructure:"max_connections"`
-	ReadTimeout    int             `mapstructure:"read_timeout"`
-	WebSocket      WebSocketConfig `mapstructure:"websocket"`
+	Port           int             `mapstructure:"port"`            // 端口
+	Host           string          `mapstructure:"host"`            // 主机
+	MaxConnections int             `mapstructure:"max_connections"` // 最大连接数
+	ReadTimeout    int             `mapstructure:"read_timeout"`    // 读取超时
+	WebSocket      WebSocketConfig `mapstructure:"websocket"`       // WebSocket配置
 }
 
 // WebSocketConfig holds WebSocket-specific settings
 type WebSocketConfig struct {
-	ReadTimeout       int  `mapstructure:"read_timeout"`
-	MaxMessageSize    int  `mapstructure:"max_message_size"`
-	ReadBufferSize    int  `mapstructure:"read_buffer_size"`
-	WriteBufferSize   int  `mapstructure:"write_buffer_size"`
-	EnableCompression bool `mapstructure:"enable_compression"`
+	ReadTimeout       int  `mapstructure:"read_timeout"`       // 读取超时
+	MaxMessageSize    int  `mapstructure:"max_message_size"`   // 最大消息大小
+	ReadBufferSize    int  `mapstructure:"read_buffer_size"`   // 读取缓冲区大小
+	WriteBufferSize   int  `mapstructure:"write_buffer_size"`  // 写入缓冲区大小
+	EnableCompression bool `mapstructure:"enable_compression"` // 是否启用压缩
 }
 
 // SessionConfig holds session-related configuration
 type SessionConfig struct {
-	SendQueueSize int `mapstructure:"send_queue_size"`
-	MaxSendErrors int `mapstructure:"max_send_errors"`
+	SendQueueSize int `mapstructure:"send_queue_size"` // 发送队列大小
+	MaxSendErrors int `mapstructure:"max_send_errors"` // 最大发送错误数
 }
 
 // VADConfig holds VAD-related configuration
 type VADConfig struct {
-	Provider  string        `mapstructure:"provider"`
-	PoolSize  int           `mapstructure:"pool_size"`
-	Threshold float32       `mapstructure:"threshold"`
-	SileroVAD SileroVADConf `mapstructure:"silero_vad"`
-	TenVAD    TenVADConf    `mapstructure:"ten_vad"`
+	Provider  string        `mapstructure:"provider"`   // VAD提供者
+	PoolSize  int           `mapstructure:"pool_size"`  // 线程池大小
+	Threshold float32       `mapstructure:"threshold"`  // 阈值
+	SileroVAD SileroVADConf `mapstructure:"silero_vad"` // Silero VAD配置
+	TenVAD    TenVADConf    `mapstructure:"ten_vad"`    // Ten VAD配置
 }
 
 // SileroVADConf holds Silero VAD specific configuration
 type SileroVADConf struct {
-	ModelPath          string  `mapstructure:"model_path"`
-	Threshold          float32 `mapstructure:"threshold"`
-	MinSilenceDuration float32 `mapstructure:"min_silence_duration"`
-	MinSpeechDuration  float32 `mapstructure:"min_speech_duration"`
-	MaxSpeechDuration  float32 `mapstructure:"max_speech_duration"`
-	WindowSize         int     `mapstructure:"window_size"`
-	BufferSizeSeconds  float32 `mapstructure:"buffer_size_seconds"`
+	ModelPath          string  `mapstructure:"model_path"`           // 模型路径
+	Threshold          float32 `mapstructure:"threshold"`            // 阈值
+	MinSilenceDuration float32 `mapstructure:"min_silence_duration"` // 最小静音时长
+	MinSpeechDuration  float32 `mapstructure:"min_speech_duration"`  // 最小说话时长
+	MaxSpeechDuration  float32 `mapstructure:"max_speech_duration"`  // 最大说话时长
+	WindowSize         int     `mapstructure:"window_size"`          // 窗口大小
+	BufferSizeSeconds  float32 `mapstructure:"buffer_size_seconds"`  // 缓冲区大小
 }
 
 // TenVADConf holds TEN VAD specific configuration
 type TenVADConf struct {
-	HopSize          int `mapstructure:"hop_size"`
-	MinSpeechFrames  int `mapstructure:"min_speech_frames"`
-	MaxSilenceFrames int `mapstructure:"max_silence_frames"`
+	HopSize          int `mapstructure:"hop_size"`           // 跳跃大小
+	MinSpeechFrames  int `mapstructure:"min_speech_frames"`  // 最小说话帧数
+	MaxSilenceFrames int `mapstructure:"max_silence_frames"` // 最大静音帧数
 }
 
 // RecognitionConfig holds ASR recognition configuration
 type RecognitionConfig struct {
-	ModelPath                   string `mapstructure:"model_path"`
-	TokensPath                  string `mapstructure:"tokens_path"`
-	Language                    string `mapstructure:"language"`
-	UseInverseTextNormalization bool   `mapstructure:"use_inverse_text_normalization"`
-	NumThreads                  int    `mapstructure:"num_threads"`
-	Provider                    string `mapstructure:"provider"`
-	Debug                       bool   `mapstructure:"debug"`
+	ModelPath                   string `mapstructure:"model_path"`                     // 模型路径
+	TokensPath                  string `mapstructure:"tokens_path"`                    // 词表路径
+	Language                    string `mapstructure:"language"`                       // 语言
+	UseInverseTextNormalization bool   `mapstructure:"use_inverse_text_normalization"` // 是否使用逆文本规范化
+	NumThreads                  int    `mapstructure:"num_threads"`                    // 线程数
+	Provider                    string `mapstructure:"provider"`                       // 提供者
+	Debug                       bool   `mapstructure:"debug"`                          // 调试
 }
 
 // SpeakerConfig holds speaker recognition configuration
 type SpeakerConfig struct {
-	Enabled    bool    `mapstructure:"enabled"`
-	ModelPath  string  `mapstructure:"model_path"`
-	NumThreads int     `mapstructure:"num_threads"`
-	Provider   string  `mapstructure:"provider"`
-	Threshold  float32 `mapstructure:"threshold"`
-	DataDir    string  `mapstructure:"data_dir"`
+	Enabled    bool    `mapstructure:"enabled"`     // 启用
+	ModelPath  string  `mapstructure:"model_path"`  // 模型路径
+	NumThreads int     `mapstructure:"num_threads"` // 线程数
+	Provider   string  `mapstructure:"provider"`    // 提供者
+	Threshold  float32 `mapstructure:"threshold"`   // 阈值
+	DataDir    string  `mapstructure:"data_dir"`    // 数据目录
 }
 
 // AudioConfig holds audio processing configuration
 type AudioConfig struct {
-	SampleRate      int     `mapstructure:"sample_rate"`
-	FeatureDim      int     `mapstructure:"feature_dim"`
-	NormalizeFactor float32 `mapstructure:"normalize_factor"`
-	ChunkSize       int     `mapstructure:"chunk_size"`
+	SampleRate      int     `mapstructure:"sample_rate"`      // 采样率
+	FeatureDim      int     `mapstructure:"feature_dim"`      // 特征维度
+	NormalizeFactor float32 `mapstructure:"normalize_factor"` // 归一化因子
+	ChunkSize       int     `mapstructure:"chunk_size"`       // 分块大小
 }
 
 // PoolConfig holds worker pool configuration
 type PoolConfig struct {
-	InstanceMode string `mapstructure:"instance_mode"`
-	WorkerCount  int    `mapstructure:"worker_count"`
-	QueueSize    int    `mapstructure:"queue_size"`
+	InstanceMode string `mapstructure:"instance_mode"` // 实例模式
+	WorkerCount  int    `mapstructure:"worker_count"`  // 工作线程数
+	QueueSize    int    `mapstructure:"queue_size"`    // 队列大小
 }
 
 // RateLimitConfig holds rate limiting configuration
 type RateLimitConfig struct {
-	Enabled           bool `mapstructure:"enabled"`
-	RequestsPerSecond int  `mapstructure:"requests_per_second"`
-	BurstSize         int  `mapstructure:"burst_size"`
-	MaxConnections    int  `mapstructure:"max_connections"`
+	Enabled           bool `mapstructure:"enabled"`             // 启用限流
+	RequestsPerSecond int  `mapstructure:"requests_per_second"` // 每秒请求数
+	BurstSize         int  `mapstructure:"burst_size"`          // 突发请求数
+	MaxConnections    int  `mapstructure:"max_connections"`     // 最大连接数
 }
 
 // ResponseConfig holds response handling configuration
 type ResponseConfig struct {
-	SendMode string `mapstructure:"send_mode"`
-	Timeout  int    `mapstructure:"timeout"`
+	SendMode string `mapstructure:"send_mode"` // 发送模式
+	Timeout  int    `mapstructure:"timeout"`   // 超时时间
 }
 
 // LoggingConfig holds logging configuration
 type LoggingConfig struct {
-	Level      string `mapstructure:"level"`
-	Format     string `mapstructure:"format"`
-	Output     string `mapstructure:"output"`
-	FilePath   string `mapstructure:"file_path"`
-	MaxSize    int    `mapstructure:"max_size"`
-	MaxBackups int    `mapstructure:"max_backups"`
-	MaxAge     int    `mapstructure:"max_age"`
-	Compress   bool   `mapstructure:"compress"`
+	Level      string `mapstructure:"level"`       // 日志级别
+	Format     string `mapstructure:"format"`      // 日志格式
+	Output     string `mapstructure:"output"`      // 输出方式
+	FilePath   string `mapstructure:"file_path"`   // 日志文件路径
+	MaxSize    int    `mapstructure:"max_size"`    // 最大日志文件大小
+	MaxBackups int    `mapstructure:"max_backups"` // 最大日志文件备份数
+	MaxAge     int    `mapstructure:"max_age"`     // 最大日志文件保留天数
+	Compress   bool   `mapstructure:"compress"`    // 是否压缩
 }
 
 // ============================================================================
@@ -275,12 +275,12 @@ func Load(configPath string) (*Config, error) {
 	if err := v.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if errors.As(err, &configFileNotFoundError) {
-			fmt.Println("⚠️  Config file not found, using defaults")
+			fmt.Println("[WARN] Config file not found, using defaults")
 		} else {
 			return nil, fmt.Errorf("error reading config file: %w", err)
 		}
 	} else {
-		fmt.Printf("✅ Using config file: %s\n", v.ConfigFileUsed())
+		fmt.Printf("[INFO] Using config file: %s\n", v.ConfigFileUsed())
 	}
 
 	// Unmarshal to struct
@@ -546,7 +546,7 @@ func IsSensitiveKey(key string) bool {
 // Print outputs the configuration to stdout with sensitive data masked.
 // Safe to use in logs and console output.
 func (c *Config) Print() {
-	fmt.Println("📋 Current Configuration:")
+	fmt.Println("[CONFIG] Current Configuration:")
 	fmt.Printf("  Server: %s:%d\n", c.Server.Host, c.Server.Port)
 	fmt.Printf("  Max Connections: %d\n", c.Server.MaxConnections)
 	fmt.Printf("  Read Timeout: %ds\n", c.Server.ReadTimeout)
@@ -699,7 +699,7 @@ func (m *HotReloadManager) StartWatching() error {
 	})
 	v.WatchConfig()
 
-	fmt.Printf("🔍 Started watching config file: %s\n", m.configPath)
+	fmt.Printf("[INFO] Started watching config file: %s\n", m.configPath)
 	return nil
 }
 
@@ -721,15 +721,15 @@ func (m *HotReloadManager) handleConfigChange() {
 
 // reloadAndNotify reloads the configuration and notifies all callbacks.
 func (m *HotReloadManager) reloadAndNotify() {
-	fmt.Println("🔄 Configuration file changed, reloading...")
+	fmt.Println("[INFO] Configuration file changed, reloading...")
 
 	// Reload configuration
 	if err := m.cfg.Reload(m.configPath); err != nil {
-		fmt.Printf("❌ Failed to reload configuration: %v\n", err)
+		fmt.Printf("[ERROR] Failed to reload configuration: %v\n", err)
 		return
 	}
 
-	fmt.Println("✅ Configuration reloaded successfully")
+	fmt.Println("[INFO] Configuration reloaded successfully")
 
 	// Notify all callbacks
 	m.mu.RLock()
@@ -741,7 +741,7 @@ func (m *HotReloadManager) reloadAndNotify() {
 		go func(cb ConfigChangeCallback) {
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Printf("❌ Config callback panicked: %v\n", r)
+					fmt.Printf("[ERROR] Config callback panicked: %v\n", r)
 				}
 			}()
 			cb(m.cfg)
