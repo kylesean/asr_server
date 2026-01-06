@@ -30,11 +30,40 @@ func NewHandler(cfg *config.Config, sessionManager *session.Manager, globalRecog
 		sessionManager:   sessionManager,
 		globalRecognizer: globalRecognizer,
 		upgrader: websocket.Upgrader{
-			CheckOrigin:       func(r *http.Request) bool { return true },
+			CheckOrigin:       makeOriginChecker(cfg),
 			ReadBufferSize:    cfg.Server.WebSocket.ReadBufferSize,
 			WriteBufferSize:   cfg.Server.WebSocket.WriteBufferSize,
 			EnableCompression: cfg.Server.WebSocket.EnableCompression,
 		},
+	}
+}
+
+// makeOriginChecker creates an origin checker based on configuration
+func makeOriginChecker(cfg *config.Config) func(r *http.Request) bool {
+	return func(r *http.Request) bool {
+		wsConfig := cfg.Server.WebSocket
+
+		// If AllowAllOrigins is true, allow all (for development)
+		if wsConfig.AllowAllOrigins {
+			return true
+		}
+
+		origin := r.Header.Get("Origin")
+
+		// If no origin header, allow (same-origin request)
+		if origin == "" {
+			return true
+		}
+
+		// Check against allowed origins
+		for _, allowed := range wsConfig.AllowedOrigins {
+			if origin == allowed {
+				return true
+			}
+		}
+
+		logger.Warn("websocket_origin_rejected", "origin", origin, "allowed_origins", wsConfig.AllowedOrigins)
+		return false
 	}
 }
 

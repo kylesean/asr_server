@@ -25,6 +25,10 @@ type Session struct {
 	mu          sync.RWMutex
 	closed      int32
 
+	// Context for cancellation propagation
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// Send queue and channels
 	SendQueue    chan interface{}
 	sendDone     chan struct{}
@@ -56,10 +60,25 @@ type Manager struct {
 	activeSessions int64
 	totalMessages  int64
 
+	// Session cleanup
+	cleanupTicker  *time.Ticker
+	sessionTimeout time.Duration
+
+	// Recognition worker pool to limit concurrent goroutines
+	recognitionWorkers    chan struct{}
+	maxRecognitionWorkers int
+
 	// Cleanup
 	ctx    context.Context
 	cancel context.CancelFunc
 }
+
+// Default settings for session management
+const (
+	DefaultSessionTimeout        = 5 * time.Minute
+	DefaultMaxRecognitionWorkers = 50
+	CleanupInterval              = 30 * time.Second
+)
 
 // Global buffer pool (8KB)
 var bufferPool = sync.Pool{
@@ -84,15 +103,104 @@ func NewManager(cfg *config.Config, recognizer *sherpa.OfflineRecognizer, vadPoo
 	ctx, cancel := context.WithCancel(context.Background())
 
 	manager := &Manager{
-		cfg:        cfg,
-		sessions:   make(map[string]*Session),
-		recognizer: recognizer,
-		vadPool:    vadPool,
-		ctx:        ctx,
-		cancel:     cancel,
+		cfg:                   cfg,
+		sessions:              make(map[string]*Session),
+		recognizer:            recognizer,
+		vadPool:               vadPool,
+		ctx:                   ctx,
+		cancel:                cancel,
+		sessionTimeout:        DefaultSessionTimeout,
+		maxRecognitionWorkers: DefaultMaxRecognitionWorkers,
+		recognitionWorkers:    make(chan struct{}, DefaultMaxRecognitionWorkers),
 	}
 
+	// Start session cleanup routine
+	manager.startCleanupRoutine()
+
 	return manager
+}
+
+// startCleanupRoutine starts the background session cleanup goroutine
+func (m *Manager) startCleanupRoutine() {
+	m.cleanupTicker = time.NewTicker(CleanupInterval)
+	go func() {
+		for {
+			select {
+			case <-m.cleanupTicker.C:
+				m.cleanupInactiveSessions()
+			case <-m.ctx.Done():
+				m.cleanupTicker.Stop()
+				return
+			}
+		}
+	}()
+	logger.Info("session_cleanup_routine_started", "interval", CleanupInterval, "timeout", m.sessionTimeout)
+}
+
+// cleanupInactiveSessions removes sessions that have been inactive for too long
+func (m *Manager) cleanupInactiveSessions() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now().UnixNano()
+	timeoutNano := int64(m.sessionTimeout)
+	cleanedCount := 0
+
+	for id, session := range m.sessions {
+		lastSeen := atomic.LoadInt64(&session.LastSeen)
+		if now-lastSeen > timeoutNano {
+			inactiveDuration := time.Duration(now - lastSeen)
+			logger.Warn("session_timeout_cleanup", "session_id", id, "inactive_duration", inactiveDuration)
+			m.closeSession(session)
+			delete(m.sessions, id)
+			atomic.AddInt64(&m.activeSessions, -1)
+			cleanedCount++
+		}
+	}
+
+	if cleanedCount > 0 {
+		logger.Info("session_cleanup_completed", "cleaned_count", cleanedCount, "remaining", len(m.sessions))
+	}
+}
+
+// submitRecognitionTask submits a recognition task with worker pool limiting
+func (m *Manager) submitRecognitionTask(sessionCtx context.Context, samples []float32, sampleRate int, sessionID string) {
+	select {
+	case m.recognitionWorkers <- struct{}{}:
+		go func() {
+			defer func() { <-m.recognitionWorkers }()
+
+			// Check if session context is cancelled
+			select {
+			case <-sessionCtx.Done():
+				logger.Debug("recognition_task_cancelled", "session_id", sessionID)
+				return
+			default:
+			}
+
+			stream := sherpa.NewOfflineStream(m.recognizer)
+			defer sherpa.DeleteOfflineStream(stream)
+			stream.AcceptWaveform(sampleRate, samples)
+			m.recognizer.Decode(stream)
+			result := stream.GetResult()
+
+			// Check again after decoding
+			select {
+			case <-sessionCtx.Done():
+				logger.Debug("recognition_result_discarded_session_closed", "session_id", sessionID)
+				return
+			default:
+			}
+
+			if result != nil {
+				m.handleRecognitionResult(sessionID, result.Text, nil)
+			} else {
+				m.handleRecognitionResult(sessionID, "", fmt.Errorf("recognition failed"))
+			}
+		}()
+	default:
+		logger.Warn("recognition_worker_pool_full", "session_id", sessionID, "max_workers", m.maxRecognitionWorkers)
+	}
 }
 
 // CreateSession creates a new session
@@ -101,12 +209,17 @@ func (m *Manager) CreateSession(sessionID string, conn *websocket.Conn) (*Sessio
 		return nil, fmt.Errorf("VAD pool is not initialized")
 	}
 
+	// Create session context for cancellation propagation
+	sessionCtx, sessionCancel := context.WithCancel(m.ctx)
+
 	session := &Session{
 		ID:                sessionID,
 		Conn:              conn,
 		VADInstance:       nil, // Lazy allocation
 		LastSeen:          time.Now().UnixNano(),
 		closed:            0,
+		ctx:               sessionCtx,
+		cancel:            sessionCancel,
 		SendQueue:         make(chan interface{}, m.cfg.Session.SendQueueSize),
 		sendDone:          make(chan struct{}),
 		sendErrCount:      0,
@@ -329,21 +442,9 @@ func (m *Manager) processSileroVAD(session *Session, sessionID string, float32Sl
 		}
 	}
 
-	// Process collected speech segments
-	for i, samples := range speechSegments {
-		taskID := fmt.Sprintf("%s_%d_%d", sessionID, time.Now().UnixNano(), i)
-		go func(samples []float32, sampleRate int, sessionID string, taskID string) {
-			stream := sherpa.NewOfflineStream(m.recognizer)
-			defer sherpa.DeleteOfflineStream(stream)
-			stream.AcceptWaveform(sampleRate, samples)
-			m.recognizer.Decode(stream)
-			result := stream.GetResult()
-			if result != nil {
-				m.handleRecognitionResult(sessionID, result.Text, nil)
-			} else {
-				m.handleRecognitionResult(sessionID, "", fmt.Errorf("recognition failed"))
-			}
-		}(samples, sampleRate, sessionID, taskID)
+	// Process collected speech segments using worker pool
+	for _, samples := range speechSegments {
+		m.submitRecognitionTask(session.ctx, samples, sampleRate, sessionID)
 	}
 
 	return nil
@@ -396,21 +497,10 @@ func (m *Manager) processTenVAD(session *Session, sessionID string, float32Slice
 						logger.Debug("speech_segment_completed", "session_id", sessionID, "samples", len(session.currentSegment), "frames", frameCount)
 						duration := float64(len(session.currentSegment)) / float64(sampleRate)
 						logger.Info("asr_segment_stats", "duration", duration, "samples", len(session.currentSegment))
-						taskID := fmt.Sprintf("%s_%d", sessionID, time.Now().UnixNano())
 						segmentCopy := make([]float32, len(session.currentSegment))
 						copy(segmentCopy, session.currentSegment)
-						go func(segment []float32, sr int, sid string, tid string) {
-							stream := sherpa.NewOfflineStream(m.recognizer)
-							defer sherpa.DeleteOfflineStream(stream)
-							stream.AcceptWaveform(sr, segment)
-							m.recognizer.Decode(stream)
-							result := stream.GetResult()
-							if result != nil {
-								m.handleRecognitionResult(sid, result.Text, nil)
-							} else {
-								m.handleRecognitionResult(sid, "", fmt.Errorf("recognition failed"))
-							}
-						}(segmentCopy, sampleRate, sessionID, taskID)
+						// Use worker pool for recognition task
+						m.submitRecognitionTask(session.ctx, segmentCopy, sampleRate, sessionID)
 					} else {
 						logger.Debug("speech_segment_too_short", "session_id", sessionID, "frames", frameCount)
 					}
@@ -461,6 +551,11 @@ func (m *Manager) handleRecognitionResult(sessionID, result string, err error) {
 // closeSession closes a session
 func (m *Manager) closeSession(session *Session) {
 	if atomic.CompareAndSwapInt32(&session.closed, 0, 1) {
+		// Cancel session context to stop any in-progress recognition tasks
+		if session.cancel != nil {
+			session.cancel()
+		}
+
 		close(session.sendDone)
 		for len(session.SendQueue) > 0 {
 			<-session.SendQueue
@@ -503,7 +598,11 @@ func (m *Manager) GetStats() map[string]interface{} {
 func (m *Manager) Shutdown() {
 	logger.Info("shutting_down_session_manager")
 
+	// Stop cleanup routine
 	m.cancel()
+	if m.cleanupTicker != nil {
+		m.cleanupTicker.Stop()
+	}
 
 	m.mu.Lock()
 	for sessionID, session := range m.sessions {

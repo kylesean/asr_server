@@ -141,11 +141,13 @@ type ServerConfig struct {
 
 // WebSocketConfig holds WebSocket-specific settings
 type WebSocketConfig struct {
-	ReadTimeout       int  `mapstructure:"read_timeout"`       // 读取超时
-	MaxMessageSize    int  `mapstructure:"max_message_size"`   // 最大消息大小
-	ReadBufferSize    int  `mapstructure:"read_buffer_size"`   // 读取缓冲区大小
-	WriteBufferSize   int  `mapstructure:"write_buffer_size"`  // 写入缓冲区大小
-	EnableCompression bool `mapstructure:"enable_compression"` // 是否启用压缩
+	ReadTimeout       int      `mapstructure:"read_timeout"`       // 读取超时
+	MaxMessageSize    int      `mapstructure:"max_message_size"`   // 最大消息大小
+	ReadBufferSize    int      `mapstructure:"read_buffer_size"`   // 读取缓冲区大小
+	WriteBufferSize   int      `mapstructure:"write_buffer_size"`  // 写入缓冲区大小
+	EnableCompression bool     `mapstructure:"enable_compression"` // 是否启用压缩
+	AllowAllOrigins   bool     `mapstructure:"allow_all_origins"`  // 是否允许所有来源（开发模式）
+	AllowedOrigins    []string `mapstructure:"allowed_origins"`    // 允许的来源列表
 }
 
 // SessionConfig holds session-related configuration
@@ -319,6 +321,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.websocket.read_buffer_size", DefaultWebSocketBufSize)
 	v.SetDefault("server.websocket.write_buffer_size", DefaultWebSocketBufSize)
 	v.SetDefault("server.websocket.enable_compression", DefaultEnableCompression)
+	v.SetDefault("server.websocket.allow_all_origins", true) // Default to allow all for development
+	v.SetDefault("server.websocket.allowed_origins", []string{})
 
 	// Session defaults
 	v.SetDefault("session.send_queue_size", DefaultSendQueueSize)
