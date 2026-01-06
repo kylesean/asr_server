@@ -78,6 +78,9 @@ const (
 	DefaultSessionTimeout        = 5 * time.Minute
 	DefaultMaxRecognitionWorkers = 50
 	CleanupInterval              = 30 * time.Second
+	// MaxSegmentSamples limits the maximum size of audio segment to prevent memory exhaustion
+	// At 16kHz sample rate, 60 seconds = 960000 samples
+	MaxSegmentSamples = 960000
 )
 
 // Global buffer pool (8KB)
@@ -89,6 +92,9 @@ var bufferPool = sync.Pool{
 
 // Global float32 slice pool
 var float32Pool = sync.Pool{}
+
+// Global int16 slice pool for TEN-VAD frame processing
+var int16Pool = sync.Pool{}
 
 // getFloat32PoolSlice returns a float32 slice from pool or creates new one
 func getFloat32PoolSlice(chunkSize int) []float32 {
@@ -462,6 +468,12 @@ func (m *Manager) processTenVAD(session *Session, sessionID string, float32Slice
 	maxSilenceFrames := m.cfg.VAD.TenVAD.MaxSilenceFrames
 	sampleRate := m.cfg.Audio.SampleRate
 
+	// Get or create int16 buffer from pool for frame processing
+	var int16Buffer []int16
+	if pooled := int16Pool.Get(); pooled != nil {
+		int16Buffer = pooled.([]int16)
+	}
+
 	// Frame processing
 	for i := 0; i < len(float32Slice); i += hopSize {
 		end := i + hopSize
@@ -469,12 +481,23 @@ func (m *Manager) processTenVAD(session *Session, sessionID string, float32Slice
 			end = len(float32Slice)
 		}
 		frame := float32Slice[i:end]
-		int16Frame := make([]int16, len(frame))
+
+		// Reuse or allocate int16 buffer
+		frameLen := len(frame)
+		if int16Buffer == nil || cap(int16Buffer) < frameLen {
+			int16Buffer = make([]int16, frameLen)
+		}
+		int16Frame := int16Buffer[:frameLen]
 		for j, f := range frame {
 			int16Frame[j] = int16(f * 32768)
 		}
+
 		_, flag, err := pool.GetInstance().ProcessAudio(tenVADInstance.Handle, int16Frame)
 		if err != nil {
+			// Return buffer to pool before returning error
+			if int16Buffer != nil {
+				int16Pool.Put(int16Buffer)
+			}
 			return fmt.Errorf("TEN-VAD ProcessAudio error: %v", err)
 		}
 
@@ -487,6 +510,18 @@ func (m *Manager) processTenVAD(session *Session, sessionID string, float32Slice
 			}
 			session.currentSegment = append(session.currentSegment, frame...)
 			session.silenceFrameCount = 0
+
+			// Check if segment exceeds maximum length to prevent memory exhaustion
+			if len(session.currentSegment) >= MaxSegmentSamples {
+				logger.Warn("segment_max_length_exceeded", "session_id", sessionID,
+					"samples", len(session.currentSegment), "max", MaxSegmentSamples)
+				// Force recognition of current segment
+				segmentCopy := make([]float32, len(session.currentSegment))
+				copy(segmentCopy, session.currentSegment)
+				m.submitRecognitionTask(session.ctx, segmentCopy, sampleRate, sessionID)
+				// Reset segment state
+				session.currentSegment = make([]float32, 0)
+			}
 		} else {
 			if session.isInSpeech {
 				session.silenceFrameCount++
@@ -510,6 +545,11 @@ func (m *Manager) processTenVAD(session *Session, sessionID string, float32Slice
 				}
 			}
 		}
+	}
+
+	// Return int16 buffer to pool
+	if int16Buffer != nil {
+		int16Pool.Put(int16Buffer)
 	}
 
 	return nil
@@ -536,7 +576,8 @@ func (m *Manager) handleRecognitionResult(sessionID, result string, err error) {
 		}
 		select {
 		case session.SendQueue <- response:
-			logger.Info("recognition_result_queued", "session_id", sessionID, "result", result)
+			// Log result length instead of content to prevent sensitive data exposure
+			logger.Info("recognition_result_queued", "session_id", sessionID, "result_length", len(result))
 		default:
 			logger.Warn("recognition_result_dropped", "session_id", sessionID)
 		}

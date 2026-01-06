@@ -192,33 +192,42 @@ func (p *SileroVADPool) Initialize() error {
 
 // Get 获取VAD实例
 func (p *SileroVADPool) Get() (VADInstanceInterface, error) {
-	logger.Debug("getting_silero_vad_instance", "available", len(p.available))
+	const maxRetries = 10 // Prevent infinite loop
 
-	select {
-	case instance := <-p.available:
-		logger.Debug("got_silero_vad_instance", "id", instance.GetID())
-		if atomic.CompareAndSwapInt32(&instance.(*SileroVADInstance).InUse, 0, 1) {
-			instance.SetLastUsed(time.Now().UnixNano())
-			atomic.AddInt64(&p.totalReused, 1)
-			atomic.AddInt64(&p.totalActive, 1)
-			logger.Debug("silero_vad_marked_in_use", "id", instance.GetID(), "active", atomic.LoadInt64(&p.totalActive))
-			return instance, nil
-		}
-		// 实例已被使用，重新放回队列
-		logger.Warn("silero_vad_instance_already_in_use", "id", instance.GetID())
+	for retry := 0; retry < maxRetries; retry++ {
+		logger.Debug("getting_silero_vad_instance", "available", len(p.available), "retry", retry)
+
 		select {
-		case p.available <- instance:
-		default:
+		case instance := <-p.available:
+			logger.Debug("got_silero_vad_instance", "id", instance.GetID())
+			if atomic.CompareAndSwapInt32(&instance.(*SileroVADInstance).InUse, 0, 1) {
+				instance.SetLastUsed(time.Now().UnixNano())
+				atomic.AddInt64(&p.totalReused, 1)
+				atomic.AddInt64(&p.totalActive, 1)
+				logger.Debug("silero_vad_marked_in_use", "id", instance.GetID(), "active", atomic.LoadInt64(&p.totalActive))
+				return instance, nil
+			}
+			// Instance already in use, put back and retry
+			logger.Warn("silero_vad_instance_already_in_use", "id", instance.GetID())
+			select {
+			case p.available <- instance:
+			default:
+			}
+			// Continue to next iteration (loop retry instead of recursion)
+			continue
+		case <-time.After(100 * time.Millisecond):
+			// Timeout, create new instance
+			logger.Warn("silero_vad_pool_timeout", "action", "create_temporary_instance")
+			return p.createNewInstance()
+		case <-p.ctx.Done():
+			logger.Error("silero_vad_pool_shuting_down")
+			return nil, fmt.Errorf("Silero VAD pool is shutting down")
 		}
-		return p.Get() // 递归重试
-	case <-time.After(100 * time.Millisecond):
-		// 超时，创建新实例
-		logger.Warn("silero_vad_pool_timeout", "action", "create_temporary_instance")
-		return p.createNewInstance()
-	case <-p.ctx.Done():
-		logger.Error("silero_vad_pool_shuting_down")
-		return nil, fmt.Errorf("Silero VAD pool is shutting down")
 	}
+
+	// Exhausted retries, create new instance as fallback
+	logger.Warn("silero_vad_pool_max_retries_exceeded", "action", "create_temporary_instance")
+	return p.createNewInstance()
 }
 
 // Put 归还VAD实例
